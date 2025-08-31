@@ -14,7 +14,11 @@ export class UIManager {
     this.stopSystemBtn = document.getElementById('stopSystem');
     this.startScreenAndMicBtn = document.getElementById('startScreenAndMic');
     this.stopScreenAndMicBtn = document.getElementById('stopScreenAndMic');
+    this.startCameraBtn = document.getElementById('startCamera');
+    this.stopCameraBtn = document.getElementById('stopCamera');
     this.statusElement = document.getElementById('status');
+    this.timerElement = document.getElementById('timer');
+    this.warningElement = document.getElementById('warning');
     this.logDiv = document.getElementById('log');
     this.checklistDiv = document.getElementById('checklist');
 
@@ -59,6 +63,9 @@ export class UIManager {
     } else if (type === RECORDING_TYPES.SCREEN_AND_MIC) {
       this.startScreenAndMicBtn.disabled = isRecording;
       this.stopScreenAndMicBtn.disabled = !isRecording;
+    } else if (type === RECORDING_TYPES.CAMERA) {
+      this.startCameraBtn.disabled = isRecording;
+      this.stopCameraBtn.disabled = !isRecording;
     }
   }
 
@@ -116,5 +123,23 @@ export class UIManager {
         this.statusElement.style.opacity = '0';
       }, 2000);
     }
+  }
+
+  /**
+   * Updates the timer display.
+   * @param {number} seconds - The total seconds of the recording.
+   */
+  updateTimer(seconds) {
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = seconds % 60;
+    const formattedTime = `${String(minutes).padStart(2, '0')}:${String(remainingSeconds).padStart(2, '0')}`;
+    this.timerElement.textContent = formattedTime;
+  }
+
+  /**
+   * Shows the memory usage warning message.
+   */
+  showWarning() {
+    this.warningElement.style.display = 'block';
   }
 }

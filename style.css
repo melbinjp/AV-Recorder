@@ -109,6 +109,13 @@ body {
     margin-bottom: 1rem;
   }
 
+  .timer {
+    font-size: 1.2rem;
+    font-weight: bold;
+    margin-left: 1rem;
+    vertical-align: middle;
+  }
+
   .header {
     display: flex;
     justify-content: space-between;
@@ -185,4 +192,13 @@ body {
     --text-color: #f8f9fa;
     --card-background: #343a40;
     --border-color: #495057;
+  }
+
+  .warning-message {
+    background-color: #fff3cd;
+    color: #856404;
+    padding: 1rem;
+    border: 1px solid #ffeeba;
+    border-radius: 0.25rem;
+    margin-top: 1rem;
   }

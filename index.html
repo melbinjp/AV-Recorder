@@ -38,12 +38,21 @@
                 <button id="startScreenAndMic" class="button"><i class="fas fa-play"></i> Start Recording</button>
                 <button id="stopScreenAndMic" class="button" disabled><i class="fas fa-stop"></i> Stop Recording</button>
             </div>
+            <div class="card">
+                <h3><i class="fas fa-camera"></i> Camera Recording</h3>
+                <button id="startCamera" class="button"><i class="fas fa-play"></i> Start Recording</button>
+                <button id="stopCamera" class="button" disabled><i class="fas fa-stop"></i> Stop Recording</button>
+            </div>
         </div>
         <div class="status-container">
             <span id="status" class="status"></span>
+            <span id="timer" class="timer">00:00</span>
         </div>
         <div id="checklist" class="checklist"></div>
         <div id="log" class="log"></div>
+        <div id="warning" class="warning-message" style="display: none;">
+            Warning: Long recordings can consume significant memory and may cause performance issues.
+        </div>
     </div>
     <script src="src/main.js" type="module"></script>
 </body>

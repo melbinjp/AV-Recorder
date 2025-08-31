@@ -25,6 +25,7 @@ export class RecorderService {
     this.systemAudioChunks = [];
     this.isRecording = false;
     this.startTime = 0;
+    this.timerInterval = null;
 
     this.setupAudioCapabilities();
   }
@@ -87,8 +88,9 @@ export class RecorderService {
       if (audioTrack) {
         combinedStream.addTrack(audioTrack);
       }
-
       stream = combinedStream;
+    } else if (type === RECORDING_TYPES.CAMERA) {
+      stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
     }
 
     this.startTime = Date.now();
@@ -101,6 +103,14 @@ export class RecorderService {
     this.setupRecordingHandlers(type);
     this.mediaRecorder.start();
     this.isRecording = true;
+
+    this.timerInterval = setInterval(() => {
+      const seconds = Math.floor((Date.now() - this.startTime) / 1000);
+      this.callbacks.updateTimer(seconds);
+      if (seconds >= 300) { // 5 minutes
+        this.callbacks.showWarning();
+      }
+    }, 1000);
   }
 
   /**
@@ -136,6 +146,7 @@ export class RecorderService {
     this.mediaRecorder.stop();
     this.mediaRecorder.stream.getTracks().forEach(track => track.stop());
 
+    clearInterval(this.timerInterval);
     this.isRecording = false;
   }
 

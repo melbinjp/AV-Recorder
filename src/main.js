@@ -16,6 +16,8 @@ class App {
       updateChecklist: this.uiManager.updateChecklist.bind(this.uiManager),
       logError: this.uiManager.logError.bind(this.uiManager),
       logMessage: this.uiManager.logMessage.bind(this.uiManager),
+      updateTimer: this.uiManager.updateTimer.bind(this.uiManager),
+      showWarning: this.uiManager.showWarning.bind(this.uiManager),
     });
 
     this.setupEventListeners();
@@ -32,6 +34,8 @@ class App {
     this.uiManager.stopSystemBtn.addEventListener('click', () => this.handleRecording(RECORDING_TYPES.SYSTEM, false));
     this.uiManager.startScreenAndMicBtn.addEventListener('click', () => this.handleRecording(RECORDING_TYPES.SCREEN_AND_MIC, true));
     this.uiManager.stopScreenAndMicBtn.addEventListener('click', () => this.handleRecording(RECORDING_TYPES.SCREEN_AND_MIC, false));
+    this.uiManager.startCameraBtn.addEventListener('click', () => this.handleRecording(RECORDING_TYPES.CAMERA, true));
+    this.uiManager.stopCameraBtn.addEventListener('click', () => this.handleRecording(RECORDING_TYPES.CAMERA, false));
   }
 
   /**
