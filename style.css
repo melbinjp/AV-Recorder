@@ -107,6 +107,10 @@ body {
   .card h3 {
     margin-top: 0;
     margin-bottom: 1rem;
+    min-height: 3em;
+    display: flex;
+    align-items: center;
+    justify-content: center;
   }
 
   .timer {
