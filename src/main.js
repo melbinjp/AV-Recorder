@@ -19,6 +19,7 @@ class App {
     });
 
     this.setupEventListeners();
+    this.setupThemeSwitcher();
   }
 
   /**
@@ -76,6 +77,31 @@ class App {
       this.uiManager.updateUI(false, type);
       this.uiManager.updateStatus(false);
     }
+  }
+
+  /**
+   * Sets up the theme switcher logic.
+   */
+  setupThemeSwitcher() {
+    const themeToggle = document.getElementById('theme-toggle');
+    const currentTheme = localStorage.getItem('theme');
+
+    if (currentTheme) {
+      document.body.setAttribute('data-theme', currentTheme);
+      if (currentTheme === 'dark') {
+        themeToggle.checked = true;
+      }
+    }
+
+    themeToggle.addEventListener('change', (e) => {
+      if (e.target.checked) {
+        document.body.setAttribute('data-theme', 'dark');
+        localStorage.setItem('theme', 'dark');
+      } else {
+        document.body.setAttribute('data-theme', 'light');
+        localStorage.setItem('theme', 'light');
+      }
+    });
   }
 }
 

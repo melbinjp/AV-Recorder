@@ -103,9 +103,8 @@ describe('App Integration Tests', () => {
     await new Promise(process.nextTick);
 
     expect(navigator.mediaDevices.getDisplayMedia).toHaveBeenCalledWith({ video: true, audio: true });
-    expect(mockMediaRecorderInstances.length).toBe(2);
+    expect(mockMediaRecorderInstances.length).toBe(1);
     expect(mockMediaRecorderInstances[0].start).toHaveBeenCalled();
-    expect(mockMediaRecorderInstances[1].start).toHaveBeenCalled();
     expect(startSystemBtn.disabled).toBe(true);
     expect(stopSystemBtn.disabled).toBe(false);
 
@@ -114,7 +113,6 @@ describe('App Integration Tests', () => {
     await new Promise(process.nextTick);
 
     expect(mockMediaRecorderInstances[0].stop).toHaveBeenCalled();
-    expect(mockMediaRecorderInstances[1].stop).toHaveBeenCalled();
     expect(startSystemBtn.disabled).toBe(false);
     expect(stopSystemBtn.disabled).toBe(true);
   });

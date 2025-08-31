@@ -1,8 +1,27 @@
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap');
+
+:root {
+  --primary-color: #007bff;
+  --primary-hover-color: #0056b3;
+  --background-color: #f8f9fa;
+  --text-color: #333;
+  --card-background: #fff;
+  --border-color: #dee2e6;
+  --disabled-color: #cccccc;
+  --error-color: #dc3545;
+  --error-bg: #f8d7da;
+}
+
+body {
+  font-family: 'Poppins', sans-serif;
+  background-color: var(--background-color);
+  color: var(--text-color);
+}
+
 .container {
     max-width: 800px;
     margin: 0 auto;
     padding: 2rem;
-    font-family: system-ui, -apple-system, sans-serif;
   }
   
   .button {
@@ -10,25 +29,36 @@
     margin: 0.5rem;
     font-size: 1rem;
     cursor: pointer;
-    background-color: var(--primary-color, #4CAF50);
+    background-color: var(--primary-color);
     color: white;
     border: none;
-    border-radius: 0.25rem;
+    border-radius: 0.5rem;
     transition: all 0.3s ease;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .button i {
+    margin-right: 0.5rem;
+  }
+
+  .button:hover:not(:disabled) {
+    background-color: var(--primary-hover-color);
   }
   
   .button:disabled {
-    background-color: var(--disabled-color, #cccccc);
+    background-color: var(--disabled-color);
     cursor: not-allowed;
     opacity: 0.7;
   }
   
   .error-message {
-    color: var(--error-color, #ff4444);
+    color: var(--error-color);
     padding: 0.5rem;
     margin: 0.5rem 0;
-    border-left: 4px solid currentColor;
-    background-color: var(--error-bg, #fff5f5);
+    border-left: 4px solid var(--error-color);
+    background-color: var(--error-bg);
   }
 
   .status-container {
@@ -49,7 +79,7 @@
 
   .status.recording {
     opacity: 1;
-    background-color: var(--error-color, #ff4444);
+    background-color: var(--error-color);
     animation: blink 1s infinite;
   }
 
@@ -58,4 +88,101 @@
     50% { opacity: 0.5; }
     100% { opacity: 1; }
   }
-  
+
+  .controls-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 1.5rem;
+    margin-bottom: 2rem;
+  }
+
+  .card {
+    background-color: var(--card-background);
+    border-radius: 0.5rem;
+    padding: 1.5rem;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    text-align: center;
+  }
+
+  .card h3 {
+    margin-top: 0;
+    margin-bottom: 1rem;
+  }
+
+  .header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 2rem;
+  }
+
+  /* The switch - the box around the slider */
+  .switch {
+    position: relative;
+    display: inline-block;
+    width: 60px;
+    height: 34px;
+  }
+
+  /* Hide default HTML checkbox */
+  .switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+  }
+
+  /* The slider */
+  .slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: #ccc;
+    -webkit-transition: .4s;
+    transition: .4s;
+  }
+
+  .slider:before {
+    position: absolute;
+    content: "";
+    height: 26px;
+    width: 26px;
+    left: 4px;
+    bottom: 4px;
+    background-color: white;
+    -webkit-transition: .4s;
+    transition: .4s;
+  }
+
+  input:checked + .slider {
+    background-color: var(--primary-color);
+  }
+
+  input:focus + .slider {
+    box-shadow: 0 0 1px var(--primary-color);
+  }
+
+  input:checked + .slider:before {
+    -webkit-transform: translateX(26px);
+    -ms-transform: translateX(26px);
+    transform: translateX(26px);
+  }
+
+  /* Rounded sliders */
+  .slider.round {
+    border-radius: 34px;
+  }
+
+  .slider.round:before {
+    border-radius: 50%;
+  }
+
+  /* Dark Theme */
+  body[data-theme="dark"] {
+    --background-color: #212529;
+    --text-color: #f8f9fa;
+    --card-background: #343a40;
+    --border-color: #495057;
+  }
