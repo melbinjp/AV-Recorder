@@ -6,8 +6,8 @@
     <title>Audio Video Recorder</title>
     <link rel="stylesheet" href="style.css">
     <!-- Favicon -->
-    <link rel="icon" type="image/png" href="https://raw.githubusercontent.com/melbinjp/favicon/master/favicon.png">
-    <link rel="icon" type="image/svg+xml" href="https://raw.githubusercontent.com/melbinjp/favicon/master/favicon.svg">
+    <link rel="icon" type="image/png" href="assets/favicon.png">
+    <link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
 
 </head>
 <body>
@@ -18,10 +18,15 @@
             <button id="stopMic" class="button" disabled>Stop Recording Microphone</button>
             <button id="startSystem" class="button">Start Screen recording</button>
             <button id="stopSystem" class="button" disabled>Stop Screen System</button>
+            <button id="startScreenAndMic" class="button">Start Screen & Mic Recording</button>
+            <button id="stopScreenAndMic" class="button" disabled>Stop Screen & Mic Recording</button>
+        </div>
+        <div class="status-container">
+            <span id="status" class="status"></span>
         </div>
         <div id="checklist" class="checklist"></div>
         <div id="log" class="log"></div>
     </div>
-    <script src="script.js"></script>
+    <script src="src/main.js" type="module"></script>
 </body>
 </html>

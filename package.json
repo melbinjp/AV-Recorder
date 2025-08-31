@@ -1,0 +1,14 @@
+{
+  "name": "audio-video-recorder",
+  "version": "1.0.0",
+  "description": "A modern web-based audio and video recording tool.",
+  "type": "module",
+  "main": "src/main.js",
+  "scripts": {
+    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "jest-environment-jsdom": "^29.7.0"
+  }
+}
