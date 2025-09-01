@@ -17,6 +17,9 @@ export class UIManager {
     this.statusElement = document.getElementById('status');
     this.timerElement = document.getElementById('timer');
     this.warningElement = document.getElementById('warning');
+    this.previewContainer = document.getElementById('preview-container');
+    this.previewVideo = document.getElementById('preview-video');
+    this.downloadBtn = document.getElementById('download-btn');
     this.logDiv = document.getElementById('log');
     this.checklistDiv = document.getElementById('checklist');
 
@@ -142,8 +145,9 @@ export class UIManager {
    * Adds a new recording block to the timeline visualization.
    * @param {object} recording - The recording metadata.
    * @param {number} sessionStartTime - The start time of the session.
+   * @param {function} previewCallback - The callback to trigger when a block is clicked.
    */
-  addRecordingToTimeline(recording, sessionStartTime) {
+  addRecordingToTimeline(recording, sessionStartTime, previewCallback) {
     const timelineScale = 0.1; // 1 pixel per 10ms, or 100px per second
     const track = document.querySelector(`.track[data-track-type="${recording.type}"]`);
     if (!track) return;
@@ -152,21 +156,23 @@ export class UIManager {
     block.className = 'recording-block';
     block.style.left = `${(recording.startTime - sessionStartTime) * timelineScale}px`;
     block.style.width = `${recording.duration * timelineScale}px`;
+    block.dataset.recordingId = recording.id;
 
     block.addEventListener('click', () => {
-      const url = URL.createObjectURL(recording.blob);
-      const a = document.createElement('a');
-      a.style.display = 'none';
-      a.href = url;
-      a.download = `${recording.type}-${new Date(recording.startTime).toISOString()}.webm`;
-      document.body.appendChild(a);
-      a.click();
-      setTimeout(() => {
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-      }, 100);
+      previewCallback(recording.id);
     });
 
     track.appendChild(block);
+  }
+
+  /**
+   * Shows the preview player with the specified video.
+   * @param {string} blobUrl - The URL of the blob to preview.
+   * @param {function} downloadHandler - The handler for the download button.
+   */
+  showPreview(blobUrl, downloadHandler) {
+    this.previewVideo.src = blobUrl;
+    this.downloadBtn.onclick = downloadHandler;
+    this.previewContainer.style.display = 'block';
   }
 }

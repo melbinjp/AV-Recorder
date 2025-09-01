@@ -143,24 +143,10 @@ export class RecorderService {
   }
 
   /**
-   * Handles the saved recording by triggering a download and passing metadata back.
+   * Handles the saved recording by passing the recording metadata back to the app.
    * @param {object} recording - The recording metadata object.
    */
   saveRecording(recording) {
     this.callbacks.onSave(recording);
-
-    const url = URL.createObjectURL(recording.blob);
-    const a = document.createElement('a');
-    a.style.display = 'none';
-    a.href = url;
-    a.download = `${recording.type}-${new Date().toISOString()}.webm`;
-
-    document.body.appendChild(a);
-    a.click();
-
-    setTimeout(() => {
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-    }, 100);
   }
 }

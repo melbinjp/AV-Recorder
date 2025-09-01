@@ -159,6 +159,21 @@ body {
     margin-top: 1rem;
   }
 
+  .preview-container {
+    margin-top: 2rem;
+    padding: 1.5rem;
+    background-color: var(--card-background);
+    border-radius: 0.5rem;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+  }
+
+  #preview-video {
+    width: 100%;
+    max-height: 500px;
+    border-radius: 0.25rem;
+    margin-bottom: 1rem;
+  }
+
   .timeline-container {
     margin-top: 3rem;
     padding: 1.5rem;

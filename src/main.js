@@ -12,6 +12,7 @@ class App {
    */
   constructor() {
     this.sessionStartTime = Date.now();
+    this.recordings = new Map();
     this.uiManager = new UIManager();
     this.recorderService = new RecorderService({
       updateChecklist: this.uiManager.updateChecklist.bind(this.uiManager),
@@ -26,8 +27,33 @@ class App {
   }
 
   handleSave(recording) {
+    const id = `rec-${Date.now()}`;
+    const recordingWithId = { ...recording, id };
+    this.recordings.set(id, recordingWithId);
+
     this.uiManager.logMessage(`Recording of type '${recording.type}' saved.`);
-    this.uiManager.addRecordingToTimeline(recording, this.sessionStartTime);
+    this.uiManager.addRecordingToTimeline(recordingWithId, this.sessionStartTime, this.previewRecording.bind(this));
+  }
+
+  previewRecording(id) {
+    const recording = this.recordings.get(id);
+    if (!recording) return;
+
+    const blobUrl = URL.createObjectURL(recording.blob);
+
+    const downloadHandler = () => {
+      const a = document.createElement('a');
+      a.style.display = 'none';
+      a.href = blobUrl;
+      a.download = `${recording.type}-${new Date(recording.startTime).toISOString()}.webm`;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        document.body.removeChild(a);
+      }, 100);
+    };
+
+    this.uiManager.showPreview(blobUrl, downloadHandler);
   }
 
   /**
