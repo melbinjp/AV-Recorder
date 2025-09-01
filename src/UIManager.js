@@ -14,6 +14,14 @@ export class UIManager {
     this.stopSystemBtn = document.getElementById('stopSystem');
     this.startCameraBtn = document.getElementById('startCamera');
     this.stopCameraBtn = document.getElementById('stopCamera');
+    this.pauseMicBtn = document.getElementById('pauseMic');
+    this.resumeMicBtn = document.getElementById('resumeMic');
+    this.pauseSystemBtn = document.getElementById('pauseSystem');
+    this.resumeSystemBtn = document.getElementById('resumeSystem');
+    this.pauseCameraBtn = document.getElementById('pauseCamera');
+    this.resumeCameraBtn = document.getElementById('resumeCamera');
+    this.audioInputSelect = document.getElementById('audio-input');
+    this.videoInputSelect = document.getElementById('video-input');
     this.statusElement = document.getElementById('status');
     this.timerElement = document.getElementById('timer');
     this.warningElement = document.getElementById('warning');
@@ -50,21 +58,35 @@ export class UIManager {
   }
 
   /**
-   * Updates the enabled/disabled state of the recording buttons.
-   * @param {boolean} isRecording - Whether a recording is currently in progress.
-   * @param {string} type - The type of recording ('microphone', 'system', etc.).
+   * Updates the UI based on the current recording state.
+   * @param {string} type - The type of recording.
+   * @param {string} state - The current state ('recording', 'paused', 'stopped').
    */
-  updateUI(isRecording, type) {
+  updateUI(type, state) {
+    const buttons = this.getButtonsForType(type);
+    if (!buttons) return;
+
+    buttons.start.style.display = state === 'stopped' ? 'inline-flex' : 'none';
+    buttons.pause.style.display = state === 'recording' ? 'inline-flex' : 'none';
+    buttons.resume.style.display = state === 'paused' ? 'inline-flex' : 'none';
+    buttons.stop.style.display = (state === 'recording' || state === 'paused') ? 'inline-flex' : 'none';
+
+    buttons.pause.disabled = false;
+    buttons.resume.disabled = false;
+    buttons.stop.disabled = false;
+  }
+
+  getButtonsForType(type) {
     if (type === RECORDING_TYPES.MICROPHONE) {
-      this.startMicBtn.disabled = isRecording;
-      this.stopMicBtn.disabled = !isRecording;
-    } else if (type === RECORDING_TYPES.SYSTEM) {
-      this.startSystemBtn.disabled = isRecording;
-      this.stopSystemBtn.disabled = !isRecording;
-    } else if (type === RECORDING_TYPES.CAMERA) {
-      this.startCameraBtn.disabled = isRecording;
-      this.stopCameraBtn.disabled = !isRecording;
+      return { start: this.startMicBtn, stop: this.stopMicBtn, pause: this.pauseMicBtn, resume: this.resumeMicBtn };
     }
+    if (type === RECORDING_TYPES.SYSTEM) {
+      return { start: this.startSystemBtn, stop: this.stopSystemBtn, pause: this.pauseSystemBtn, resume: this.resumeSystemBtn };
+    }
+    if (type === RECORDING_TYPES.CAMERA) {
+      return { start: this.startCameraBtn, stop: this.stopCameraBtn, pause: this.pauseCameraBtn, resume: this.resumeCameraBtn };
+    }
+    return null;
   }
 
   /**
@@ -145,20 +167,30 @@ export class UIManager {
    * Adds a new recording block to the timeline visualization.
    * @param {object} recording - The recording metadata.
    * @param {number} sessionStartTime - The start time of the session.
-   * @param {function} previewCallback - The callback to trigger when a block is clicked.
+   * @param {function} previewCallback - The callback for previewing a recording.
+   * @param {function} deleteCallback - The callback for deleting a recording.
    */
-  addRecordingToTimeline(recording, sessionStartTime, previewCallback) {
+  addRecordingToTimeline(recording, sessionStartTime, previewCallback, deleteCallback) {
     const timelineScale = 0.1; // 1 pixel per 10ms, or 100px per second
     const track = document.querySelector(`.track[data-track-type="${recording.type}"]`);
     if (!track) return;
 
     const block = document.createElement('div');
     block.className = 'recording-block';
+    block.id = `rec-block-${recording.id}`;
     block.style.left = `${(recording.startTime - sessionStartTime) * timelineScale}px`;
     block.style.width = `${recording.duration * timelineScale}px`;
-    block.dataset.recordingId = recording.id;
 
-    block.addEventListener('click', () => {
+    const deleteBtn = document.createElement('button');
+    deleteBtn.className = 'delete-btn';
+    deleteBtn.innerHTML = '<i class="fas fa-trash"></i>';
+    deleteBtn.addEventListener('click', () => {
+      deleteCallback(recording.id);
+    });
+    block.appendChild(deleteBtn);
+
+    block.addEventListener('click', (e) => {
+      if (e.target.closest('.delete-btn')) return;
       previewCallback(recording.id);
     });
 
@@ -174,5 +206,31 @@ export class UIManager {
     this.previewVideo.src = blobUrl;
     this.downloadBtn.onclick = downloadHandler;
     this.previewContainer.style.display = 'block';
+  }
+
+  removeRecordingFromTimeline(id) {
+    const block = document.getElementById(`rec-block-${id}`);
+    if (block) {
+      block.remove();
+    }
+  }
+
+  populateDeviceLists(devices) {
+    this.audioInputSelect.innerHTML = '';
+    this.videoInputSelect.innerHTML = '';
+
+    devices.audio.forEach(device => {
+      const option = document.createElement('option');
+      option.value = device.deviceId;
+      option.text = device.label || `Microphone ${this.audioInputSelect.options.length + 1}`;
+      this.audioInputSelect.appendChild(option);
+    });
+
+    devices.video.forEach(device => {
+      const option = document.createElement('option');
+      option.value = device.deviceId;
+      option.text = device.label || `Camera ${this.videoInputSelect.options.length + 1}`;
+      this.videoInputSelect.appendChild(option);
+    });
   }
 }

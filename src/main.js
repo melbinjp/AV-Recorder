@@ -1,6 +1,7 @@
 import { UIManager } from './UIManager.js';
 import { RecorderService } from './RecorderService.js';
 import { RECORDING_TYPES } from './constants.js';
+import { DeviceManager } from './DeviceManager.js';
 
 /**
  * The main application class.
@@ -24,6 +25,13 @@ class App {
 
     this.setupEventListeners();
     this.setupThemeSwitcher();
+    this.deviceManager = new DeviceManager();
+    this.populateDevices();
+  }
+
+  async populateDevices() {
+    const devices = await this.deviceManager.getDevices();
+    this.uiManager.populateDeviceLists(devices);
   }
 
   handleSave(recording) {
@@ -32,7 +40,17 @@ class App {
     this.recordings.set(id, recordingWithId);
 
     this.uiManager.logMessage(`Recording of type '${recording.type}' saved.`);
-    this.uiManager.addRecordingToTimeline(recordingWithId, this.sessionStartTime, this.previewRecording.bind(this));
+    this.uiManager.addRecordingToTimeline(
+      recordingWithId,
+      this.sessionStartTime,
+      this.previewRecording.bind(this),
+      this.deleteRecording.bind(this)
+    );
+  }
+
+  deleteRecording(id) {
+    this.recordings.delete(id);
+    this.uiManager.removeRecordingFromTimeline(id);
   }
 
   previewRecording(id) {
@@ -60,56 +78,76 @@ class App {
    * Sets up the event listeners for the recording buttons.
    */
   setupEventListeners() {
-    this.uiManager.startMicBtn.addEventListener('click', () => this.handleRecording(RECORDING_TYPES.MICROPHONE, true));
-    this.uiManager.stopMicBtn.addEventListener('click', () => this.handleRecording(RECORDING_TYPES.MICROPHONE, false));
-    this.uiManager.startSystemBtn.addEventListener('click', () => this.handleRecording(RECORDING_TYPES.SYSTEM, true));
-    this.uiManager.stopSystemBtn.addEventListener('click', () => this.handleRecording(RECORDING_TYPES.SYSTEM, false));
-    this.uiManager.startCameraBtn.addEventListener('click', () => this.handleRecording(RECORDING_TYPES.CAMERA, true));
-    this.uiManager.stopCameraBtn.addEventListener('click', () => this.handleRecording(RECORDING_TYPES.CAMERA, false));
+    // Microphone
+    this.uiManager.startMicBtn.addEventListener('click', () => this.handleRecording(RECORDING_TYPES.MICROPHONE, 'start'));
+    this.uiManager.pauseMicBtn.addEventListener('click', () => this.handleRecording(RECORDING_TYPES.MICROPHONE, 'pause'));
+    this.uiManager.resumeMicBtn.addEventListener('click', () => this.handleRecording(RECORDING_TYPES.MICROPHONE, 'resume'));
+    this.uiManager.stopMicBtn.addEventListener('click', () => this.handleRecording(RECORDING_TYPES.MICROPHONE, 'stop'));
+    // System
+    this.uiManager.startSystemBtn.addEventListener('click', () => this.handleRecording(RECORDING_TYPES.SYSTEM, 'start'));
+    this.uiManager.pauseSystemBtn.addEventListener('click', () => this.handleRecording(RECORDING_TYPES.SYSTEM, 'pause'));
+    this.uiManager.resumeSystemBtn.addEventListener('click', () => this.handleRecording(RECORDING_TYPES.SYSTEM, 'resume'));
+    this.uiManager.stopSystemBtn.addEventListener('click', () => this.handleRecording(RECORDING_TYPES.SYSTEM, 'stop'));
+    // Camera
+    this.uiManager.startCameraBtn.addEventListener('click', () => this.handleRecording(RECORDING_TYPES.CAMERA, 'start'));
+    this.uiManager.pauseCameraBtn.addEventListener('click', () => this.handleRecording(RECORDING_TYPES.CAMERA, 'pause'));
+    this.uiManager.resumeCameraBtn.addEventListener('click', () => this.handleRecording(RECORDING_TYPES.CAMERA, 'resume'));
+    this.uiManager.stopCameraBtn.addEventListener('click', () => this.handleRecording(RECORDING_TYPES.CAMERA, 'stop'));
   }
 
   /**
-   * Handles the start and stop recording logic.
+   * Handles all recording actions (start, pause, resume, stop).
    * @param {string} type - The type of recording.
-   * @param {boolean} start - Whether to start or stop the recording.
+   * @param {string} action - The action to perform.
    */
-  async handleRecording(type, start) {
-    if (start) {
-      // Optimistically update UI
-      this.uiManager.updateUI(true, type);
-      this.uiManager.updateStatus(true);
-      try {
-        await this.recorderService.startRecording(type);
-      } catch (error) {
-        this.recorderService.isRecording = false; // Correct the state
-        this.uiManager.updateUI(false, type); // Revert UI
-        this.uiManager.updateStatus(false); // Revert status
+  async handleRecording(type, action) {
+    switch (action) {
+      case 'start':
+        this.uiManager.updateUI(type, 'recording');
+        this.uiManager.updateStatus(true);
+        try {
+          const audioDeviceId = this.uiManager.audioInputSelect.value;
+          const videoDeviceId = this.uiManager.videoInputSelect.value;
+          await this.recorderService.startRecording(type, { audio: audioDeviceId, video: videoDeviceId });
+        } catch (error) {
+          this.uiManager.updateUI(type, 'stopped');
+          this.uiManager.updateStatus(false);
 
-        let errorMessage = 'An unknown error occurred.';
-        switch (error.name) {
-          case 'NotAllowedError':
-          case 'SecurityError':
-            errorMessage = 'Permission denied. Please allow access to your microphone/screen and ensure you are on a secure (HTTPS) connection.';
-            break;
-          case 'NotFoundError':
-            errorMessage = 'No media devices found. Please ensure you have a working microphone/camera.';
-            break;
-          case 'NotReadableError':
-            errorMessage = 'Could not read from your media device. It might be in use by another application.';
-            break;
-          case 'AbortError':
-            errorMessage = 'The request was aborted. Please try again.';
-            break;
-          default:
-            errorMessage = `An unexpected error occurred: ${error.name} - ${error.message}`;
-            break;
+          let errorMessage = 'An unknown error occurred.';
+          switch (error.name) {
+            case 'NotAllowedError':
+            case 'SecurityError':
+              errorMessage = 'Permission denied. Please allow access to your microphone/screen and ensure you are on a secure (HTTPS) connection.';
+              break;
+            case 'NotFoundError':
+              errorMessage = 'No media devices found. Please ensure you have a working microphone/camera.';
+              break;
+            case 'NotReadableError':
+              errorMessage = 'Could not read from your media device. It might be in use by another application.';
+              break;
+            case 'AbortError':
+              errorMessage = 'The request was aborted. Please try again.';
+              break;
+            default:
+              errorMessage = `An unexpected error occurred: ${error.name} - ${error.message}`;
+              break;
+          }
+          this.uiManager.logError(errorMessage);
         }
-        this.uiManager.logError(errorMessage);
-      }
-    } else {
-      this.recorderService.stopRecording();
-      this.uiManager.updateUI(false, type);
-      this.uiManager.updateStatus(false);
+        break;
+      case 'pause':
+        this.recorderService.pauseRecording();
+        this.uiManager.updateUI(type, 'paused');
+        break;
+      case 'resume':
+        this.recorderService.resumeRecording();
+        this.uiManager.updateUI(type, 'recording');
+        break;
+      case 'stop':
+        this.recorderService.stopRecording();
+        this.uiManager.updateUI(type, 'stopped');
+        this.uiManager.updateStatus(false);
+        break;
     }
   }
 

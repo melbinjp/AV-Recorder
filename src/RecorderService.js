@@ -26,6 +26,7 @@ export class RecorderService {
     this.isRecording = false;
     this.startTime = 0;
     this.timerInterval = null;
+    this.elapsedSeconds = 0;
 
     this.setupAudioCapabilities();
   }
@@ -46,13 +47,17 @@ export class RecorderService {
 
   /**
    * Starts a recording of the specified type.
-   * @param {string} type - The type of recording ('microphone', 'system', 'screen_and_mic').
+   * @param {string} type - The type of recording.
+   * @param {object} deviceIds - The IDs of the devices to use.
    * @throws {Error} If the recording fails to start.
    */
-  async startRecording(type) {
+  async startRecording(type, deviceIds) {
     let stream;
+    const audioConstraint = deviceIds.audio ? { deviceId: { exact: deviceIds.audio } } : true;
+    const videoConstraint = deviceIds.video ? { deviceId: { exact: deviceIds.video } } : true;
+
     if (type === RECORDING_TYPES.MICROPHONE) {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraint });
       this.callbacks.updateChecklist(1, true);
     } else if (type === RECORDING_TYPES.SYSTEM) { // 'system' recording
       const displayStream = await navigator.mediaDevices.getDisplayMedia({
@@ -75,7 +80,7 @@ export class RecorderService {
       stream = combinedStream;
       this.callbacks.updateChecklist(3, true);
     } else if (type === RECORDING_TYPES.CAMERA) {
-      stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      stream = await navigator.mediaDevices.getUserMedia({ video: videoConstraint, audio: audioConstraint });
     }
 
     this.startTime = Date.now();
@@ -88,11 +93,13 @@ export class RecorderService {
     this.setupRecordingHandlers(type);
     this.mediaRecorder.start();
     this.isRecording = true;
+    this.elapsedSeconds = 0;
+    this.callbacks.updateTimer(this.elapsedSeconds);
 
     this.timerInterval = setInterval(() => {
-      const seconds = Math.floor((Date.now() - this.startTime) / 1000);
-      this.callbacks.updateTimer(seconds);
-      if (seconds >= 300) { // 5 minutes
+      this.elapsedSeconds++;
+      this.callbacks.updateTimer(this.elapsedSeconds);
+      if (this.elapsedSeconds >= 300) { // 5 minutes
         this.callbacks.showWarning();
       }
     }, 1000);
@@ -140,6 +147,24 @@ export class RecorderService {
 
     clearInterval(this.timerInterval);
     this.isRecording = false;
+  }
+
+  pauseRecording() {
+    if (!this.mediaRecorder || this.mediaRecorder.state !== 'recording') return;
+    this.mediaRecorder.pause();
+    clearInterval(this.timerInterval);
+  }
+
+  resumeRecording() {
+    if (!this.mediaRecorder || this.mediaRecorder.state !== 'paused') return;
+    this.mediaRecorder.resume();
+    this.timerInterval = setInterval(() => {
+      this.elapsedSeconds++;
+      this.callbacks.updateTimer(this.elapsedSeconds);
+      if (this.elapsedSeconds >= 300) { // 5 minutes
+        this.callbacks.showWarning();
+      }
+    }, 1000);
   }
 
   /**

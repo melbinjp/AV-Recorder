@@ -39,6 +39,11 @@ body {
     justify-content: center;
   }
 
+  /* Hide pause/resume buttons by default */
+  #pauseMic, #resumeMic, #pauseSystem, #resumeSystem, #pauseCamera, #resumeCamera {
+    display: none;
+  }
+
   .button i {
     margin-right: 0.5rem;
   }
@@ -125,6 +130,12 @@ body {
     justify-content: space-between;
     align-items: center;
     margin-bottom: 2rem;
+    flex-wrap: wrap;
+  }
+
+  .device-selectors {
+    display: flex;
+    gap: 1rem;
   }
 
   .theme-button {
@@ -221,4 +232,20 @@ body {
 
   .recording-block:hover {
     background-color: var(--primary-hover-color);
+  }
+
+  .delete-btn {
+    position: absolute;
+    top: 5px;
+    right: 5px;
+    background: none;
+    border: none;
+    color: white;
+    cursor: pointer;
+    opacity: 0.6;
+    transition: opacity 0.2s ease;
+  }
+
+  .delete-btn:hover {
+    opacity: 1;
   }
