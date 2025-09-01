@@ -16,10 +16,9 @@
         <div class="header">
             <h1>Audio-Video Recorder</h1>
             <div class="theme-switcher">
-                <label class="switch">
-                    <input type="checkbox" id="theme-toggle">
-                    <span class="slider round"></span>
-                </label>
+                <button id="theme-toggle-btn" class="button theme-button">
+                    <i id="theme-icon" class="fas fa-sun"></i>
+                </button>
             </div>
         </div>
         <div class="controls-grid">
@@ -32,11 +31,6 @@
                 <h3><i class="fas fa-desktop"></i> System Recording</h3>
                 <button id="startSystem" class="button"><i class="fas fa-play"></i> Start Recording</button>
                 <button id="stopSystem" class="button" disabled><i class="fas fa-stop"></i> Stop Recording</button>
-            </div>
-            <div class="card">
-                <h3><i class="fas fa-photo-video"></i> Screen & Mic Recording</h3>
-                <button id="startScreenAndMic" class="button"><i class="fas fa-play"></i> Start Recording</button>
-                <button id="stopScreenAndMic" class="button" disabled><i class="fas fa-stop"></i> Stop Recording</button>
             </div>
             <div class="card">
                 <h3><i class="fas fa-camera"></i> Camera Recording</h3>
@@ -52,6 +46,24 @@
         <div id="log" class="log"></div>
         <div id="warning" class="warning-message" style="display: none;">
             Warning: Long recordings can consume significant memory and may cause performance issues.
+        </div>
+
+        <div class="timeline-container">
+            <h2>Recording Timeline</h2>
+            <div class="timeline-tracks">
+                <div class="track" data-track-type="microphone">
+                    <span class="track-label"><i class="fas fa-microphone"></i> Mic</span>
+                </div>
+                <div class="track" data-track-type="system">
+                    <span class="track-label"><i class="fas fa-desktop"></i> System</span>
+                </div>
+                <div class="track" data-track-type="screen_and_mic">
+                    <span class="track-label"><i class="fas fa-photo-video"></i> Screen & Mic</span>
+                </div>
+                <div class="track" data-track-type="camera">
+                    <span class="track-label"><i class="fas fa-camera"></i> Camera</span>
+                </div>
+            </div>
         </div>
     </div>
     <script src="src/main.js" type="module"></script>

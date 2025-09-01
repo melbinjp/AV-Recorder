@@ -14,7 +14,7 @@ export class RecorderService {
    * @param {object} callbacks - Callbacks for updating the UI.
    * @param {function} callbacks.updateChecklist - Callback to update the checklist.
    * @param {function} callbacks.logError - Callback to log an error message.
-   * @param {function} callbacks.logMessage - Callback to log a message.
+   * @param {function} callbacks.onSave - Callback to handle a saved recording.
    */
   constructor(callbacks) {
     this.callbacks = callbacks;
@@ -74,21 +74,6 @@ export class RecorderService {
 
       stream = combinedStream;
       this.callbacks.updateChecklist(3, true);
-    } else if (type === RECORDING_TYPES.SCREEN_AND_MIC) {
-      const displayStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
-      const voiceStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-
-      const videoTrack = displayStream.getVideoTracks()[0];
-      const audioTrack = voiceStream.getAudioTracks()[0];
-
-      const combinedStream = new MediaStream();
-      if (videoTrack) {
-        combinedStream.addTrack(videoTrack);
-      }
-      if (audioTrack) {
-        combinedStream.addTrack(audioTrack);
-      }
-      stream = combinedStream;
     } else if (type === RECORDING_TYPES.CAMERA) {
       stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
     }
@@ -127,12 +112,19 @@ export class RecorderService {
     };
 
     this.mediaRecorder.onstop = () => {
-      const mimeType = type === 'microphone' ?
+      const mimeType = type === RECORDING_TYPES.MICROPHONE ?
         RecorderService.MIME_TYPES.audio :
         RecorderService.MIME_TYPES.video;
 
       const blob = new Blob(chunks, { type: mimeType });
-      this.saveRecording(blob, type);
+      const duration = Date.now() - this.startTime;
+
+      this.saveRecording({
+        blob,
+        type,
+        startTime: this.startTime,
+        duration,
+      });
       chunks.length = 0;
     };
   }
@@ -151,19 +143,17 @@ export class RecorderService {
   }
 
   /**
-   * Saves the recorded blob as a file.
-   * @param {Blob} blob - The blob to save.
-   * @param {string} type - The type of recording, used for the filename.
+   * Handles the saved recording by triggering a download and passing metadata back.
+   * @param {object} recording - The recording metadata object.
    */
-  saveRecording(blob, type) {
-    const duration = (Date.now() - this.startTime) / 1000;
-    this.callbacks.logMessage(`Recording saved. Duration: ${duration.toFixed(2)}s`);
+  saveRecording(recording) {
+    this.callbacks.onSave(recording);
 
-    const url = URL.createObjectURL(blob);
+    const url = URL.createObjectURL(recording.blob);
     const a = document.createElement('a');
     a.style.display = 'none';
     a.href = url;
-    a.download = `${type}-${new Date().toISOString()}.webm`;
+    a.download = `${recording.type}-${new Date().toISOString()}.webm`;
 
     document.body.appendChild(a);
     a.click();

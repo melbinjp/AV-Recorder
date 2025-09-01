@@ -127,67 +127,19 @@ body {
     margin-bottom: 2rem;
   }
 
-  /* The switch - the box around the slider */
-  .switch {
-    position: relative;
-    display: inline-block;
-    width: 60px;
-    height: 34px;
-  }
-
-  /* Hide default HTML checkbox */
-  .switch input {
-    opacity: 0;
-    width: 0;
-    height: 0;
-  }
-
-  /* The slider */
-  .slider {
-    position: absolute;
-    cursor: pointer;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background-color: #ccc;
-    -webkit-transition: .4s;
-    transition: .4s;
-  }
-
-  .slider:before {
-    position: absolute;
-    content: "";
-    height: 26px;
-    width: 26px;
-    left: 4px;
-    bottom: 4px;
-    background-color: white;
-    -webkit-transition: .4s;
-    transition: .4s;
-  }
-
-  input:checked + .slider {
-    background-color: var(--primary-color);
-  }
-
-  input:focus + .slider {
-    box-shadow: 0 0 1px var(--primary-color);
-  }
-
-  input:checked + .slider:before {
-    -webkit-transform: translateX(26px);
-    -ms-transform: translateX(26px);
-    transform: translateX(26px);
-  }
-
-  /* Rounded sliders */
-  .slider.round {
-    border-radius: 34px;
-  }
-
-  .slider.round:before {
+  .theme-button {
+    background: none;
+    border: 2px solid var(--text-color);
+    color: var(--text-color);
+    width: 40px;
+    height: 40px;
     border-radius: 50%;
+    padding: 0;
+  }
+
+  .theme-button:hover {
+    background-color: var(--text-color);
+    color: var(--background-color);
   }
 
   /* Dark Theme */
@@ -205,4 +157,53 @@ body {
     border: 1px solid #ffeeba;
     border-radius: 0.25rem;
     margin-top: 1rem;
+  }
+
+  .timeline-container {
+    margin-top: 3rem;
+    padding: 1.5rem;
+    background-color: var(--card-background);
+    border-radius: 0.5rem;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+  }
+
+  .timeline-tracks {
+    position: relative;
+    width: 100%;
+    background: #eee;
+    border-radius: 0.25rem;
+  }
+
+  .track {
+    position: relative;
+    height: 50px;
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    align-items: center;
+  }
+
+  .track:last-child {
+    border-bottom: none;
+  }
+
+  .track-label {
+    position: absolute;
+    left: 10px;
+    font-weight: bold;
+    color: #777;
+  }
+
+  .recording-block {
+    position: absolute;
+    height: 80%;
+    top: 10%;
+    background-color: var(--primary-color);
+    border-radius: 0.25rem;
+    opacity: 0.8;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+  }
+
+  .recording-block:hover {
+    background-color: var(--primary-hover-color);
   }

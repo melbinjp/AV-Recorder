@@ -11,17 +11,23 @@ class App {
    * Initializes the application.
    */
   constructor() {
+    this.sessionStartTime = Date.now();
     this.uiManager = new UIManager();
     this.recorderService = new RecorderService({
       updateChecklist: this.uiManager.updateChecklist.bind(this.uiManager),
       logError: this.uiManager.logError.bind(this.uiManager),
-      logMessage: this.uiManager.logMessage.bind(this.uiManager),
       updateTimer: this.uiManager.updateTimer.bind(this.uiManager),
       showWarning: this.uiManager.showWarning.bind(this.uiManager),
+      onSave: this.handleSave.bind(this),
     });
 
     this.setupEventListeners();
     this.setupThemeSwitcher();
+  }
+
+  handleSave(recording) {
+    this.uiManager.logMessage(`Recording of type '${recording.type}' saved.`);
+    this.uiManager.addRecordingToTimeline(recording, this.sessionStartTime);
   }
 
   /**
@@ -32,8 +38,6 @@ class App {
     this.uiManager.stopMicBtn.addEventListener('click', () => this.handleRecording(RECORDING_TYPES.MICROPHONE, false));
     this.uiManager.startSystemBtn.addEventListener('click', () => this.handleRecording(RECORDING_TYPES.SYSTEM, true));
     this.uiManager.stopSystemBtn.addEventListener('click', () => this.handleRecording(RECORDING_TYPES.SYSTEM, false));
-    this.uiManager.startScreenAndMicBtn.addEventListener('click', () => this.handleRecording(RECORDING_TYPES.SCREEN_AND_MIC, true));
-    this.uiManager.stopScreenAndMicBtn.addEventListener('click', () => this.handleRecording(RECORDING_TYPES.SCREEN_AND_MIC, false));
     this.uiManager.startCameraBtn.addEventListener('click', () => this.handleRecording(RECORDING_TYPES.CAMERA, true));
     this.uiManager.stopCameraBtn.addEventListener('click', () => this.handleRecording(RECORDING_TYPES.CAMERA, false));
   }
@@ -84,28 +88,42 @@ class App {
   }
 
   /**
-   * Sets up the theme switcher logic.
+   * Sets up the theme switcher logic, including system theme detection.
    */
   setupThemeSwitcher() {
-    const themeToggle = document.getElementById('theme-toggle');
-    const currentTheme = localStorage.getItem('theme');
+    const themeToggleBtn = document.getElementById('theme-toggle-btn');
+    const themeIcon = document.getElementById('theme-icon');
+    const systemPrefersDark = window.matchMedia('(prefers-color-scheme: dark)');
 
-    if (currentTheme) {
-      document.body.setAttribute('data-theme', currentTheme);
-      if (currentTheme === 'dark') {
-        themeToggle.checked = true;
-      }
-    }
+    const applyTheme = (theme) => {
+      document.body.setAttribute('data-theme', theme);
+      themeIcon.className = theme === 'dark' ? 'fas fa-sun' : 'fas fa-moon';
+      localStorage.setItem('theme', theme);
+    };
 
-    themeToggle.addEventListener('change', (e) => {
-      if (e.target.checked) {
-        document.body.setAttribute('data-theme', 'dark');
-        localStorage.setItem('theme', 'dark');
-      } else {
-        document.body.setAttribute('data-theme', 'light');
-        localStorage.setItem('theme', 'light');
+    const toggleTheme = () => {
+      const currentTheme = document.body.getAttribute('data-theme');
+      const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+      applyTheme(newTheme);
+    };
+
+    themeToggleBtn.addEventListener('click', toggleTheme);
+
+    // Listen for changes in system preference
+    systemPrefersDark.addEventListener('change', e => {
+      // Only apply if no user preference is set
+      if (!localStorage.getItem('theme')) {
+        applyTheme(e.matches ? 'dark' : 'light');
       }
     });
+
+    // Initial theme setup
+    const savedTheme = localStorage.getItem('theme');
+    if (savedTheme) {
+      applyTheme(savedTheme);
+    } else {
+      applyTheme(systemPrefersDark.matches ? 'dark' : 'light');
+    }
   }
 }
 

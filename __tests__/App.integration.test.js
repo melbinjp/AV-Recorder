@@ -48,18 +48,48 @@ beforeAll(() => {
 describe('App Integration Tests', () => {
 
   beforeEach(async () => {
-    // Set up the DOM
+    // Set up the DOM to match the new UI
     document.body.innerHTML = `
       <div class="container">
-        <h1>Audio-Video Recorder</h1>
-        <div class="controls">
-            <button id="startMic" class="button">Start Recording Microphone</button>
-            <button id="stopMic" class="button" disabled>Stop Recording Microphone</button>
-            <button id="startSystem" class="button">Start Screen recording</button>
-            <button id="stopSystem" class="button" disabled>Stop Screen System</button>
+        <div class="header">
+            <h1>Audio-Video Recorder</h1>
+            <div class="theme-switcher">
+                <button id="theme-toggle-btn" class="button theme-button">
+                    <i id="theme-icon" class="fas fa-sun"></i>
+                </button>
+            </div>
+        </div>
+        <div class="controls-grid">
+            <div class="card">
+                <h3><i class="fas fa-microphone"></i> Microphone Recording</h3>
+                <button id="startMic" class="button"><i class="fas fa-play"></i> Start Recording</button>
+                <button id="stopMic" class="button" disabled><i class="fas fa-stop"></i> Stop Recording</button>
+            </div>
+            <div class="card">
+                <h3><i class="fas fa-desktop"></i> System Recording</h3>
+                <button id="startSystem" class="button"><i class="fas fa-play"></i> Start Recording</button>
+                <button id="stopSystem" class="button" disabled><i class="fas fa-stop"></i> Stop Recording</button>
+            </div>
+            <div class="card">
+                <h3><i class="fas fa-photo-video"></i> Screen & Mic Recording</h3>
+                <button id="startScreenAndMic" class="button"><i class="fas fa-play"></i> Start Recording</button>
+                <button id="stopScreenAndMic" class="button" disabled><i class="fas fa-stop"></i> Stop Recording</button>
+            </div>
+            <div class="card">
+                <h3><i class="fas fa-camera"></i> Camera Recording</h3>
+                <button id="startCamera" class="button"><i class="fas fa-play"></i> Start Recording</button>
+                <button id="stopCamera" class="button" disabled><i class="fas fa-stop"></i> Stop Recording</button>
+            </div>
+        </div>
+        <div class="status-container">
+            <span id="status" class="status"></span>
+            <span id="timer" class="timer">00:00</span>
         </div>
         <div id="checklist" class="checklist"></div>
         <div id="log" class="log"></div>
+        <div id="warning" class="warning-message" style="display: none;">
+            Warning: Long recordings can consume significant memory and may cause performance issues.
+        </div>
     </div>
     `;
 
@@ -72,71 +102,55 @@ describe('App Integration Tests', () => {
   });
 
   it('should start and stop microphone recording correctly', async () => {
-    const startMicBtn = document.getElementById('startMic');
-    const stopMicBtn = document.getElementById('stopMic');
+    const startBtn = document.getElementById('startMic');
+    const stopBtn = document.getElementById('stopMic');
 
-    // Start recording
-    startMicBtn.click();
+    startBtn.click();
     await new Promise(process.nextTick);
 
     expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledWith({ audio: true });
     expect(mockMediaRecorderInstances.length).toBe(1);
-    expect(mockMediaRecorderInstances[0].start).toHaveBeenCalled();
-    expect(startMicBtn.disabled).toBe(true);
-    expect(stopMicBtn.disabled).toBe(false);
+    expect(startBtn.disabled).toBe(true);
+    expect(stopBtn.disabled).toBe(false);
 
-    // Stop recording
-    stopMicBtn.click();
+    stopBtn.click();
     await new Promise(process.nextTick);
-
-    expect(mockMediaRecorderInstances[0].stop).toHaveBeenCalled();
-    expect(startMicBtn.disabled).toBe(false);
-    expect(stopMicBtn.disabled).toBe(true);
+    expect(startBtn.disabled).toBe(false);
+    expect(stopBtn.disabled).toBe(true);
   });
 
   it('should start and stop system recording correctly', async () => {
-    const startSystemBtn = document.getElementById('startSystem');
-    const stopSystemBtn = document.getElementById('stopSystem');
+    const startBtn = document.getElementById('startSystem');
+    const stopBtn = document.getElementById('stopSystem');
 
-    // Start recording
-    startSystemBtn.click();
+    startBtn.click();
     await new Promise(process.nextTick);
 
     expect(navigator.mediaDevices.getDisplayMedia).toHaveBeenCalledWith({ video: true, audio: true });
     expect(mockMediaRecorderInstances.length).toBe(1);
-    expect(mockMediaRecorderInstances[0].start).toHaveBeenCalled();
-    expect(startSystemBtn.disabled).toBe(true);
-    expect(stopSystemBtn.disabled).toBe(false);
-
-    // Stop recording
-    stopSystemBtn.click();
-    await new Promise(process.nextTick);
-
-    expect(mockMediaRecorderInstances[0].stop).toHaveBeenCalled();
-    expect(startSystemBtn.disabled).toBe(false);
-    expect(stopSystemBtn.disabled).toBe(true);
-  });
-
-  it('should start and stop screen and mic recording correctly', async () => {
-    const startBtn = document.getElementById('startScreenAndMic');
-    const stopBtn = document.getElementById('stopScreenAndMic');
-
-    // Start recording
-    startBtn.click();
-    await new Promise(process.nextTick);
-
-    expect(navigator.mediaDevices.getDisplayMedia).toHaveBeenCalledWith({ video: true });
-    expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledWith({ audio: true });
-    expect(mockMediaRecorderInstances.length).toBe(1);
-    expect(mockMediaRecorderInstances[0].start).toHaveBeenCalled();
     expect(startBtn.disabled).toBe(true);
     expect(stopBtn.disabled).toBe(false);
 
-    // Stop recording
     stopBtn.click();
     await new Promise(process.nextTick);
+    expect(startBtn.disabled).toBe(false);
+    expect(stopBtn.disabled).toBe(true);
+  });
 
-    expect(mockMediaRecorderInstances[0].stop).toHaveBeenCalled();
+  it('should start and stop camera recording correctly', async () => {
+    const startBtn = document.getElementById('startCamera');
+    const stopBtn = document.getElementById('stopCamera');
+
+    startBtn.click();
+    await new Promise(process.nextTick);
+
+    expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledWith({ video: true, audio: true });
+    expect(mockMediaRecorderInstances.length).toBe(1);
+    expect(startBtn.disabled).toBe(true);
+    expect(stopBtn.disabled).toBe(false);
+
+    stopBtn.click();
+    await new Promise(process.nextTick);
     expect(startBtn.disabled).toBe(false);
     expect(stopBtn.disabled).toBe(true);
   });

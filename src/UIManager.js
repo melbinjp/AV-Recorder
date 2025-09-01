@@ -12,8 +12,6 @@ export class UIManager {
     this.stopMicBtn = document.getElementById('stopMic');
     this.startSystemBtn = document.getElementById('startSystem');
     this.stopSystemBtn = document.getElementById('stopSystem');
-    this.startScreenAndMicBtn = document.getElementById('startScreenAndMic');
-    this.stopScreenAndMicBtn = document.getElementById('stopScreenAndMic');
     this.startCameraBtn = document.getElementById('startCamera');
     this.stopCameraBtn = document.getElementById('stopCamera');
     this.statusElement = document.getElementById('status');
@@ -60,9 +58,6 @@ export class UIManager {
     } else if (type === RECORDING_TYPES.SYSTEM) {
       this.startSystemBtn.disabled = isRecording;
       this.stopSystemBtn.disabled = !isRecording;
-    } else if (type === RECORDING_TYPES.SCREEN_AND_MIC) {
-      this.startScreenAndMicBtn.disabled = isRecording;
-      this.stopScreenAndMicBtn.disabled = !isRecording;
     } else if (type === RECORDING_TYPES.CAMERA) {
       this.startCameraBtn.disabled = isRecording;
       this.stopCameraBtn.disabled = !isRecording;
@@ -141,5 +136,37 @@ export class UIManager {
    */
   showWarning() {
     this.warningElement.style.display = 'block';
+  }
+
+  /**
+   * Adds a new recording block to the timeline visualization.
+   * @param {object} recording - The recording metadata.
+   * @param {number} sessionStartTime - The start time of the session.
+   */
+  addRecordingToTimeline(recording, sessionStartTime) {
+    const timelineScale = 0.1; // 1 pixel per 10ms, or 100px per second
+    const track = document.querySelector(`.track[data-track-type="${recording.type}"]`);
+    if (!track) return;
+
+    const block = document.createElement('div');
+    block.className = 'recording-block';
+    block.style.left = `${(recording.startTime - sessionStartTime) * timelineScale}px`;
+    block.style.width = `${recording.duration * timelineScale}px`;
+
+    block.addEventListener('click', () => {
+      const url = URL.createObjectURL(recording.blob);
+      const a = document.createElement('a');
+      a.style.display = 'none';
+      a.href = url;
+      a.download = `${recording.type}-${new Date(recording.startTime).toISOString()}.webm`;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }, 100);
+    });
+
+    track.appendChild(block);
   }
 }

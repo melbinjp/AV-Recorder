@@ -6,7 +6,6 @@ A modern web-based audio and video recording tool that allows you to capture bot
 
 - **Microphone Recording**: Capture high-quality audio from your microphone
 - **Screen Recording**: Record your entire screen or specific applications
-- **Simultaneous Recording**: Capture your screen and microphone at the same time
 - **Real-time Controls**: Start, stop, and manage recordings with intuitive buttons
 - **Download Support**: Save recordings in common formats
 - **Browser-Based**: Works entirely in your browser - no software installation needed
@@ -26,13 +25,6 @@ A modern web-based audio and video recording tool that allows you to capture bot
 3. Perform your actions on screen
 4. Click "Stop Screen Recording" when finished
 5. Download your screen recording
-
-### Screen & Microphone Recording
-1. Click "Start Screen & Mic Recording" to begin capturing both your screen and microphone
-2. Select the screen or application to record and grant microphone permissions
-3. Perform your actions on screen while speaking into your microphone
-4. Click "Stop Screen & Mic Recording" when finished
-5. Download your combined recording
 
 ## 🛠️ Requirements
 
