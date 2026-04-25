@@ -1,38 +1,156 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Audio Video Recorder</title>
+    <title>Audio Video Recorder | WeCanUseAI</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="style.css">
     <!-- Favicon -->
     <link rel="icon" type="image/png" href="https://raw.githubusercontent.com/melbinjp/favicon/master/favicon.png">
     <link rel="icon" type="image/svg+xml" href="https://raw.githubusercontent.com/melbinjp/favicon/master/favicon.svg">
-
+    <!-- Phosphor Icons for UI (Local) -->
+    <link rel="stylesheet" href="assets/phosphor-icons/regular/style.css">
+    <link rel="stylesheet" href="assets/phosphor-icons/fill/style.css">
 </head>
 <body>
+    <div class="app-background"></div>
+    
     <div class="container">
-        <h1>Audio-Video Recorder</h1>
-        <div class="controls">
-            <button id="startMic" class="button">Start Recording Microphone</button>
-            <button id="stopMic" class="button" disabled>Stop Recording Microphone</button>
-            <button id="startSystem" class="button">Start Screen recording</button>
-            <button id="stopSystem" class="button" disabled>Stop Screen System</button>
-        </div>
-        <div id="checklist" class="checklist"></div>
-        <div id="log" class="log"></div>
-    </div>
-    <script src="script.js"></script>
+        <header class="app-header">
+            <div class="logo-area">
+                <i class="ph-fill ph-record"></i>
+                <h1>Media Capture Studio</h1>
+            </div>
+            <p class="subtitle">High-fidelity audio, video, and screen recording directly in your browser.</p>
+        </header>
 
-    <footer role="contentinfo" style="margin-top: 2rem; padding: 1.5rem; text-align: center; border-top: 1px solid rgba(255,255,255,0.1); color: #888;">
-    <p>&copy; <span class="copyright-year"></span> WeCanUseAI. Empowering creativity with AI.</p>
-    <div style="margin-top: 0.5rem; display: flex; justify-content: center; gap: 1.5rem;">
-      <a href="https://wecanuseai.com/" style="color: inherit; text-decoration: none;">Home</a>
-      <a href="https://wecanuseai.com/privacy.html" style="color: inherit; text-decoration: none;">Privacy</a>
-      <a href="https://wecanuseai.com/terms.html" style="color: inherit; text-decoration: none;">Terms</a>
-      <a href="https://wecanuseai.com/contact.html" style="color: inherit; text-decoration: none;">Contact</a>
+        <main class="main-content">
+            <!-- Controls Section -->
+            <section class="panel controls-panel">
+                <div class="panel-header">
+                    <h2><i class="ph ph-sliders"></i> Settings & Sources</h2>
+                </div>
+                
+                <div class="device-selectors">
+                    <div class="input-group">
+                        <label for="videoSource"><i class="ph ph-camera"></i> Camera</label>
+                        <select id="videoSource" class="device-select">
+                            <option value="">Loading devices...</option>
+                        </select>
+                        <div class="checkbox-group" style="margin-top: 0.5rem; display: flex; align-items: center; gap: 0.5rem;">
+                            <input type="checkbox" id="mirrorCamera" checked>
+                            <label for="mirrorCamera" style="font-size: 0.85rem; cursor: pointer;">Mirror Camera</label>
+                        </div>
+                    </div>
+                    <div class="input-group">
+                        <label for="audioSource"><i class="ph ph-microphone"></i> Microphone</label>
+                        <select id="audioSource" class="device-select">
+                            <option value="">Loading devices...</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="recording-actions">
+                    <div class="action-card" id="card-audio">
+                        <div class="card-icon"><i class="ph ph-microphone-stage"></i></div>
+                        <h3>Audio Only</h3>
+                        <p>Record your microphone</p>
+                        <div class="card-buttons">
+                            <button class="btn btn-primary start-btn" data-type="audio">
+                                <i class="ph-fill ph-record"></i> Start
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div class="action-card" id="card-camera">
+                        <div class="card-icon"><i class="ph ph-video-camera"></i></div>
+                        <h3>Camera</h3>
+                        <p>Record video with audio</p>
+                        <div class="card-buttons">
+                            <button class="btn btn-primary start-btn" data-type="camera">
+                                <i class="ph-fill ph-record"></i> Start
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="action-card" id="card-screen">
+                        <div class="card-icon"><i class="ph ph-monitor-play"></i></div>
+                        <h3>Screen</h3>
+                        <p>Capture screen & system audio</p>
+                        <div class="card-buttons">
+                            <button class="btn btn-primary start-btn" data-type="screen">
+                                <i class="ph-fill ph-record"></i> Start
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Preview Section -->
+            <section class="panel preview-panel">
+                <div class="panel-header">
+                    <h2><i class="ph ph-eye"></i> Live Preview</h2>
+                    <div class="status-indicator" id="recordingStatus">
+                        <span class="status-dot"></span>
+                        <span class="status-text">Ready</span>
+                        <span class="recording-time" id="recordingTime">00:00</span>
+                    </div>
+                </div>
+
+                <div class="preview-container">
+                    <video id="liveVideo" autoplay muted playsinline></video>
+                    <div class="audio-visualizer-container">
+                        <canvas id="audioVisualizer"></canvas>
+                    </div>
+                    <div class="preview-placeholder" id="previewPlaceholder">
+                        <i class="ph ph-monitor"></i>
+                        <p>Select a source to begin preview</p>
+                    </div>
+                </div>
+
+                <!-- Active Recording Controls (Hidden by default) -->
+                <div class="active-controls" id="activeControls" style="display: none;">
+                    <button class="btn btn-warning" id="pauseBtn">
+                        <i class="ph-fill ph-pause"></i> Pause
+                    </button>
+                    <button class="btn btn-danger" id="stopBtn">
+                        <i class="ph-fill ph-stop"></i> Stop Recording
+                    </button>
+                </div>
+                
+                <!-- Playback / Download Controls (Hidden by default) -->
+                <div class="playback-controls" id="playbackControls" style="display: none;">
+                     <button class="btn btn-secondary" id="discardBtn">
+                        <i class="ph ph-trash"></i> Discard
+                    </button>
+                    <button class="btn btn-success" id="downloadBtn">
+                        <i class="ph ph-download-simple"></i> Download
+                    </button>
+                </div>
+            </section>
+        </main>
+        
+        <div id="toastContainer" class="toast-container"></div>
     </div>
-  </footer>
+
+    <!-- Standardized Footer -->
+    <footer role="contentinfo" style="margin-top: 4rem; padding: 2rem; text-align: center; border-top: 1px solid rgba(255,255,255,0.1); color: #888; font-family: 'Inter', sans-serif;">
+        <p>&copy; <span class="copyright-year">2026</span> WeCanUseAI. Empowering creativity with AI.</p>
+        <div style="margin-top: 1rem; display: flex; justify-content: center; gap: 2rem; font-size: 0.9rem;">
+            <a href="https://wecanuseai.com/" style="color: #a3a3a3; text-decoration: none; transition: color 0.2s;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='#a3a3a3'">Home</a>
+            <a href="https://wecanuseai.com/privacy.html" style="color: #a3a3a3; text-decoration: none; transition: color 0.2s;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='#a3a3a3'">Privacy</a>
+            <a href="https://wecanuseai.com/terms.html" style="color: #a3a3a3; text-decoration: none; transition: color 0.2s;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='#a3a3a3'">Terms</a>
+            <a href="https://wecanuseai.com/contact.html" style="color: #a3a3a3; text-decoration: none; transition: color 0.2s;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='#a3a3a3'">Contact</a>
+        </div>
+    </footer>
+
+    <script src="script.js"></script>
+    <script>
+        document.querySelector('.copyright-year').textContent = new Date().getFullYear();
+    </script>
 </body>
 </html>
-
