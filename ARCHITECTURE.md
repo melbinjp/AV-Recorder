@@ -32,6 +32,7 @@ AV Recorder is a static web app that records camera, screen and audio entirely i
 | `js/app.js` | The coordinator: state machine, preview pipeline, recording flow, rendering. |
 | `js/icons.js` | Generated icon sprite (`node tools/build-icons.mjs`). |
 | `sw.js`, `manifest.webmanifest`, `icons/` | Offline support and installability. |
+| `.nojekyll` | Tells GitHub Pages to publish the files exactly as they are. The site has no build step, and Jekyll has broken a deploy before. Keep it. |
 
 Scripts are classic scripts sharing one namespace, `window.AVR`, loaded in dependency order at the end of `<body>`. There are no modules, so the app also runs from `file://`, where browsers refuse ES modules.
 

@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { readFile, readdir, stat } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { gzipSync } from 'node:zlib';
+import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { ROOT } from './helpers.mjs';
 
@@ -102,4 +103,25 @@ test('the version is set once and has a changelog entry', async () => {
   assert.match(changelog, new RegExp(`^## ${m[1].replace(/\./g, '\\.')} `, 'm'), `CHANGELOG.md needs a "## ${m[1]}" entry`);
   // The service worker takes its cache name from the same file.
   assert.match(await read('sw.js'), /importScripts\('js\/version\.js'\)/);
+});
+
+test('the repository holds only source: no dependencies or symlinks, and Pages publishes it as-is', async (t) => {
+  let listing;
+  try {
+    listing = execFileSync('git', ['ls-files', '-s'], { cwd: ROOT, encoding: 'utf8' });
+  } catch {
+    t.skip('not a git checkout');
+    return;
+  }
+  const entries = listing.trim().split('\n').map((line) => {
+    const [meta, file] = line.split('\t');
+    return { mode: meta.split(' ')[0], file };
+  });
+  // A committed node_modules or symlink points at someone's machine. GitHub
+  // Pages crashes on it (this broke a deploy once), and it isn't source.
+  assert.deepEqual(entries.filter((e) => /(^|\/)node_modules\//.test(e.file)).map((e) => e.file), [], 'node_modules is committed');
+  assert.deepEqual(entries.filter((e) => e.mode === '120000').map((e) => e.file), [], 'symlinks are committed');
+  // The site has no build step; .nojekyll makes GitHub Pages publish the files
+  // exactly as they are instead of running them through Jekyll.
+  assert.ok(entries.some((e) => e.file === '.nojekyll'), '.nojekyll is missing');
 });
