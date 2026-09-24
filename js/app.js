@@ -1287,6 +1287,15 @@
         AVR.toast('Recording ready, but it could not be saved in this browser. Download it now so you don\'t lose it.', 'warning', { timeout: 15000 });
       }
     }).catch(function (err) {
+      if (err && err.code === 'empty' && self.hasLiveSources()) {
+        // A tap of record-then-stop: nothing to save, and no reason to turn
+        // the camera off. Back to the preview, ready to try again.
+        self.session = null;
+        self.disposeMixer();
+        self.setState('preview');
+        AVR.toast('That was too short to record anything. Try again.', 'info');
+        return;
+      }
       AVR.log('error', 'record-failed', err);
       cleanUp();
       self.setState('idle');

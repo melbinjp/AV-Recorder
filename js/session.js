@@ -62,6 +62,7 @@
     this.seq = 0;
     this.bytes = 0;
     this.memChunks = [];
+    this.pending = {}; // seq → blob whose write to storage isn't confirmed yet
     this.memBytes = 0;
     this.headBlob = null;
     this.limitHit = false;
@@ -80,6 +81,8 @@
 
   RecordingSession.TIMESLICE = TIMESLICE;
   RecordingSession.memoryBudget = AVR.platform && AVR.platform.isMobile ? 300 * MB : 2048 * MB;
+  // Longest the save path waits on browser storage before carrying on.
+  RecordingSession.storageWait = 20000;
 
   RecordingSession.prototype.elapsed = function () {
     return this.activeMs + (this.state === 'recording' ? now() - this.resumedAt : 0);
@@ -103,7 +106,7 @@
     this.recorder = rec;
     this.mimeType = rec.mimeType || (o.format && o.format.mime) || '';
 
-    return AVR.store.available().then(function (ok) {
+    this.startPromise = AVR.store.available().then(function (ok) {
       if (!ok) return;
       self.record = {
         id: self.id,
@@ -148,6 +151,7 @@
         stored: self.persist,
       });
     });
+    return this.startPromise;
   };
 
   RecordingSession.prototype._onData = function (blob) {
@@ -172,9 +176,15 @@
       mimeType: AVR.formats.baseType(this.mimeType, this.kind),
       ext: AVR.formats.extFor(this.mimeType, this.kind),
     };
+    // Held in memory until storage confirms it, so a slow or stalled write
+    // can never drop it from the finished file.
+    this.pending[seq] = blob;
     this.writeChain = this.writeChain.then(function () {
       return AVR.store.appendChunk(self.id, seq, blob, patch);
-    }).catch(function (err) {
+    }).then(function () {
+      delete self.pending[seq];
+    }, function (err) {
+      delete self.pending[seq];
       // Usually a full disk. Keep recording into memory rather than stop.
       if (!self.storageFailed) {
         self.storageFailed = true;
@@ -238,22 +248,30 @@
     if (this.state === 'recording') this.activeMs += now() - this.resumedAt;
     this.state = 'stopping';
 
-    this.stopPromise = new Promise(function (resolve) {
-      var rec = self.recorder;
-      if (!rec || rec.state === 'inactive') return resolve();
-      var settled = false;
-      function finish() { if (!settled) { settled = true; resolve(); } }
-      rec.addEventListener('stop', finish);
-      try {
-        rec.stop();
-      } catch (e) {
-        finish();
-      }
-      // Some browsers never fire "stop" after an encoder error.
-      setTimeout(finish, 8000);
+    // Let a start that is still setting up storage finish first, so stop and
+    // start never interleave. (The start sees stopPromise and won't record.)
+    var started = this.startPromise ? this.startPromise.catch(function () {}) : Promise.resolve();
+    this.stopPromise = started.then(function () {
+      return new Promise(function (resolve) {
+        var rec = self.recorder;
+        if (!rec || rec.state === 'inactive') return resolve();
+        var settled = false;
+        var finish = function () { if (!settled) { settled = true; resolve(); } };
+        rec.addEventListener('stop', finish);
+        try {
+          rec.stop();
+        } catch (e) {
+          finish();
+        }
+        // Some browsers never fire "stop" after an encoder error.
+        setTimeout(finish, 8000);
+      });
     }).then(function () {
-      // The final chunk arrives before "stop"; wait for it to reach storage.
-      return self.writeChain;
+      // The final chunk arrives before "stop"; wait for it to reach storage,
+      // but not forever: anything unconfirmed is still held in memory.
+      return AVR.withTimeout(self.writeChain, RecordingSession.storageWait, 'timeout').then(function (r) {
+        if (r === 'timeout') log('warn', 'storage-slow', Object.keys(self.pending).length + ' chunk(s) unconfirmed');
+      });
     }).then(function () {
       return self._finalize();
     }).then(function (result) {
@@ -269,11 +287,20 @@
   };
 
   RecordingSession.prototype._collect = function () {
+    var self = this;
     var mem = this.memChunks.slice();
-    var fromDisk = this.persist ? AVR.store.getChunks(this.id).catch(function () { return []; }) : Promise.resolve([]);
+    var fromDisk = this.persist
+      ? AVR.withTimeout(AVR.store.getChunks(this.id).catch(function () { return []; }), RecordingSession.storageWait, null)
+      : Promise.resolve([]);
     return fromDisk.then(function (disk) {
+      if (disk === null) {
+        log('error', 'storage-unresponsive', 'reading chunks');
+        throw new Error('Saving is taking too long because this browser\'s storage is not responding. ' +
+          'The recording is safe: it will appear in Your recordings the next time you open the app.');
+      }
       var bySeq = {};
       disk.forEach(function (c) { bySeq[c.seq] = c; });
+      Object.keys(self.pending).forEach(function (k) { bySeq[k] = { seq: Number(k), blob: self.pending[k] }; });
       mem.forEach(function (c) { bySeq[c.seq] = c; });
       return Object.keys(bySeq).map(Number).sort(function (a, b) { return a - b; }).map(function (k) { return bySeq[k]; });
     });
@@ -287,8 +314,12 @@
 
     return this._collect().then(function (chunks) {
       if (!chunks.length) {
-        log('error', 'record-empty', { seq: self.seq, bytes: self.bytes });
-        throw new Error('Nothing was recorded. The source may have stopped before recording began.');
+        // Stopped before the encoder produced anything (a fraction of a second).
+        log('info', 'record-empty', { ms: durationMs });
+        if (self.persist) AVR.store.deleteRecording(self.id).catch(function () {});
+        var empty = new Error('Nothing was recorded.');
+        empty.code = 'empty';
+        throw empty;
       }
       var first = chunks[0];
       var isWebm = /webm/i.test(type);
@@ -316,12 +347,19 @@
         var writes = [];
         if (patched) writes.push(AVR.store.putChunk(self.id, first.seq, fixedFirst));
         self.memChunks.forEach(function (c) { writes.push(AVR.store.putChunk(self.id, c.seq, c.blob)); });
-        return Promise.all(writes).then(function () {
+        Object.keys(self.pending).forEach(function (k) { writes.push(AVR.store.putChunk(self.id, Number(k), self.pending[k])); });
+        // The file itself is ready in memory; storage bookkeeping gets a time
+        // limit so a stalled browser store can't hold the person hostage.
+        return AVR.withTimeout(Promise.all(writes).then(function () {
           return true;
         }, function () {
           return false;
-        }).then(function (complete) {
-          return AVR.store.updateRecording(self.id, {
+        }), RecordingSession.storageWait, 'timeout').then(function (complete) {
+          if (complete === 'timeout') {
+            log('warn', 'storage-slow', 'finalizing');
+            complete = true; // writes are queued; recovery completes them on the next visit
+          }
+          return AVR.withTimeout(AVR.store.updateRecording(self.id, {
             status: 'complete',
             incomplete: !complete,
             durationMs: durationMs,
@@ -330,7 +368,7 @@
             ext: ext,
             chunkCount: chunks.length,
             updatedAt: Date.now(),
-          }).then(function () {
+          }), RecordingSession.storageWait, null).then(function () {
             result.saved = complete;
             log(complete ? 'info' : 'error', complete ? 'record-saved' : 'record-partly-saved',
               { ms: durationMs, bytes: blob.size, chunks: chunks.length, type: type });

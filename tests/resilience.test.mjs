@@ -16,11 +16,13 @@ after(async () => {
   await server?.close();
 });
 
+// Starts recording and waits until the first chunk exists, so a stop is
+// never a zero-length recording by accident.
 async function recording(page) {
   await waitState(page, 'preview');
   await page.click('#recordBtn');
   await waitState(page, 'recording');
-  await page.waitForFunction(() => window.AVR.app.session && window.AVR.app.session.state === 'recording');
+  await page.waitForFunction(() => window.AVR.app.session && window.AVR.app.session.seq > 0);
 }
 
 test('a recorder failure saves part 1 and carries on recording as part 2', async () => {
@@ -66,6 +68,35 @@ test('when storage fails and memory runs short, it stops and saves by itself', a
   await context.close();
 });
 
+test('saving never hangs, and loses nothing, when browser storage stalls', async () => {
+  const { page, context } = await openApp(browser, server.url);
+  await page.evaluate(() => { window.AVR.RecordingSession.storageWait = 1500; });
+  await recording(page);
+  await page.waitForFunction(() => window.AVR.app.session.seq >= 2);
+  // From here on, every write to storage hangs and never completes.
+  await page.evaluate(() => { window.AVR.store.appendChunk = () => new Promise(() => {}); });
+  const t0 = Date.now();
+  await sleep(2500);
+  await page.click('#recordBtn');
+  await waitState(page, 'review', 15000);
+  const info = await reviewInfo(page);
+  const recordedFor = Date.now() - t0;
+  // The unconfirmed chunks came from memory: the file covers the whole take.
+  assert.ok(info.durationMs >= recordedFor - 800, `file is ${info.durationMs}ms of about ${recordedFor}ms+`);
+  if (info.type.includes('webm')) assert.ok(Number.isFinite(info.elementDuration));
+  const played = await page.evaluate(async () => {
+    const v = document.getElementById('playbackVideo');
+    v.muted = true;
+    v.currentTime = Math.max(0, v.duration - 0.5);
+    await new Promise((r) => v.addEventListener('seeked', r, { once: true }));
+    return v.currentTime;
+  });
+  assert.ok(played > info.durationMs / 1000 - 1.5, `could not seek to the end (${played}s)`);
+  const log = await page.evaluate(() => window.AVR.logEntries().map((e) => e.event));
+  assert.ok(log.includes('storage-slow'), JSON.stringify(log));
+  await context.close();
+});
+
 test('warns before and during a recording when the device is nearly full', async () => {
   const { page, context } = await openApp(browser, server.url, {
     initScript: () => {
@@ -80,6 +111,29 @@ test('warns before and during a recording when the device is nearly full', async
   await page.waitForFunction(() => /min left/.test(document.getElementById('recSize').textContent));
   await page.click('#recordBtn');
   await waitState(page, 'review', 20000);
+  await context.close();
+});
+
+test('stopping a split second after starting keeps the preview and says why', async () => {
+  const { page, errors, context } = await openApp(browser, server.url);
+  await waitState(page, 'preview');
+  // Record and stop in the same instant: the encoder cannot have produced
+  // anything yet.
+  await page.evaluate(() => { window.AVR.app.onRecordPressed(); window.AVR.app.onRecordPressed(); });
+  await waitState(page, 'preview');
+  await page.waitForSelector('.toast');
+  assert.match(await page.innerText('#toastContainer'), /too short/);
+  assert.equal(await page.evaluate(() => window.AVR.app.sources.isLive('cam')), true, 'the camera stays on');
+  await sleep(500);
+  const recs = await page.evaluate(async () => (await window.AVR.store.listRecordings()).length);
+  assert.equal(recs, 0, 'no empty recording is left behind');
+  // And it records normally straight after.
+  await page.click('#recordBtn');
+  await waitState(page, 'recording');
+  await page.waitForFunction(() => window.AVR.app.session.seq > 0);
+  await page.click('#recordBtn');
+  await waitState(page, 'review', 20000);
+  assert.deepEqual(errors, []);
   await context.close();
 });
 

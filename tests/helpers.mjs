@@ -85,8 +85,25 @@ export function trackErrors(page) {
   return errors;
 }
 
-export function waitState(page, state, timeout = 15000) {
-  return page.waitForFunction((s) => window.AVR.app.state === s, state, { timeout });
+// Waits for an app state. On timeout the error says where the app actually
+// was, including its recent diagnostics events, so a failure explains itself.
+export async function waitState(page, state, timeout = 15000) {
+  try {
+    await page.waitForFunction((s) => window.AVR.app.state === s, state, { timeout });
+  } catch (err) {
+    const where = await page.evaluate(() => {
+      const app = window.AVR && window.AVR.app;
+      const rec = app && app.session && app.session.recorder;
+      return {
+        state: app && app.state,
+        session: app && app.session && { state: app.session.state, seq: app.session.seq, bytes: app.session.bytes },
+        recorder: rec && rec.state,
+        toasts: Array.from(document.querySelectorAll('.toast-msg')).map((t) => t.textContent),
+        log: window.AVR.logEntries ? window.AVR.logEntries().slice(-12) : [],
+      };
+    }).catch((e) => ({ unavailable: e.message }));
+    throw new Error(`waited ${timeout}ms for state "${state}": ${JSON.stringify(where)}`);
+  }
 }
 
 export function state(page) {
