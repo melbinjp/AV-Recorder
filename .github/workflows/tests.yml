@@ -10,8 +10,8 @@ permissions:
   contents: read
 
 jobs:
-  browser-tests:
-    name: Record in Chromium
+  check:
+    name: Lint and test
     runs-on: ubuntu-latest
     timeout-minutes: 20
     defaults:
@@ -25,6 +25,10 @@ jobs:
           cache: npm
           cache-dependency-path: tests/package-lock.json
       - run: npm ci --no-audit --no-fund
+      - name: Lint
+        run: npm run lint
       - run: npx playwright install --with-deps chromium
-      # xvfb gives the hidden-tab test a real display; the rest run headless.
-      - run: xvfb-run -a npm test
+      # Static checks, unit tests and real recordings in Chromium. xvfb gives
+      # the hidden-tab test a real display; everything else runs headless.
+      - name: Test
+        run: xvfb-run -a npm test
