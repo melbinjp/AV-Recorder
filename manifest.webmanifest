@@ -1,0 +1,24 @@
+{
+  "name": "AV Recorder: camera, screen and audio",
+  "short_name": "AV Recorder",
+  "description": "Record your camera, screen and voice in the browser. Free, private, nothing to install. Works offline.",
+  "id": "./",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0b1120",
+  "theme_color": "#0b1120",
+  "categories": ["productivity", "utilities", "photo"],
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ],
+  "shortcuts": [
+    { "name": "Record camera", "url": "./?mode=camera", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Record screen", "url": "./?mode=screen", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Record audio", "url": "./?mode=audio", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] }
+  ]
+}
