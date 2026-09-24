@@ -32,7 +32,7 @@ test('loads and records offline once it has been visited', async () => {
     await page.waitFor(`AVR.app.session && AVR.app.session.seq > 1`);
     await page.evaluate(`document.getElementById('recordBtn').click()`);
     await page.waitFor(`AVR.app.state === 'review'`, 20000);
-    assert.ok((await page.evaluate('AVR.app.review.blob.size')) > 5000);
+    assert.ok((await page.evaluate('AVR.app.review.item.blob.size')) > 5000);
     page.close();
   } finally {
     await chrome.close();

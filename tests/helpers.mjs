@@ -100,7 +100,7 @@ export async function reviewInfo(page) {
     return v.readyState >= 1;
   }, null, { timeout: 15000 });
   return page.evaluate(async () => {
-    const r = window.AVR.app.review;
+    const r = window.AVR.app.review.item;
     const v = document.getElementById('playbackVideo');
     return {
       name: r.name,

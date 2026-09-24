@@ -78,7 +78,7 @@ test('records the camera with pause, and the file knows its duration', async () 
   // The pause must not count towards the length.
   assert.ok(Math.abs(info.durationMs - expected) < 700, `duration ${info.durationMs}ms, expected about ${expected}ms`);
   if (info.type.includes('webm')) {
-    assert.ok(Math.abs(info.headerDurationMs - info.durationMs) < 5, 'WebM header should carry the duration');
+    assert.ok(Math.abs(info.headerDurationMs - info.durationMs) < 5, 'WebM header should carry the duration: ' + JSON.stringify(info));
     assert.ok(Number.isFinite(info.elementDuration), `player duration should be finite, got ${info.elementDuration}`);
   }
   assert.ok(info.width > 0 && info.height > 0);
@@ -226,7 +226,7 @@ test('countdown can be cancelled, and keyboard shortcuts drive recording', async
   await page.waitForFunction(() => window.AVR.app.session.state === 'recording');
   await page.keyboard.press('m');
   assert.equal(await page.evaluate(() => window.AVR.app.muted), true);
-  assert.equal(await page.evaluate(() => window.AVR.app.src.mic.getAudioTracks()[0].enabled), false);
+  assert.equal(await page.evaluate(() => window.AVR.app.sources.track('mic').enabled), false);
   await page.keyboard.press('p');
   await waitState(page, 'paused');
   await page.keyboard.press('p');

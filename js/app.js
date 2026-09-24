@@ -1,9 +1,18 @@
-// The recorder: owns the capture sources, the preview, the recording session
-// and the UI state. States:
+// The recorder's coordinator: the state machine, the preview pipeline and the
+// recording flow. The parts it coordinates live in their own files:
 //
-//   idle → starting → preview → countdown → recording ⇄ paused → saving → review
+//   sources.js        camera / microphone / screen capture
+//   compositor.js     screen + camera bubble, aspect cropping
+//   audio-engine.js   level meters, microphone + computer sound mixing
+//   session.js        one recording: MediaRecorder, storage, recovery
+//   meter-view.js     the level meter and audio visualizer
+//   settings-panel.js the settings sidebar
+//   review.js         playback of a finished recording
+//   library.js        the list of saved recordings
 //
-// Design rules that keep it dependable:
+// States:  idle → starting → preview → countdown → recording ⇄ paused → saving → review
+//
+// Rules that keep it dependable:
 //  - Record the plainest stream possible. Canvas compositing and audio mixing
 //    are used only when a feature needs them.
 //  - Every async start is tagged, so a slow permission prompt that resolves
@@ -17,6 +26,7 @@
   var $$ = AVR.$$;
   var S = AVR.settings;
   var P = AVR.platform;
+  var stopStream = AVR.Sources.stopStream;
 
   var MODES = {
     camera: {
@@ -40,34 +50,19 @@
   var BASE_TITLE = document.title;
   var LIVE_STATES = { countdown: 1, recording: 1, paused: 1, saving: 1 };
 
-  function stopStream(stream) {
-    if (!stream) return;
-    stream.getTracks().forEach(function (t) {
-      try { t.stop(); } catch (e) { /* ignore */ }
-    });
-  }
-
-  function firstTrack(stream, kind) {
-    if (!stream) return null;
-    var list = kind === 'audio' ? stream.getAudioTracks() : stream.getVideoTracks();
-    return list[0] || null;
-  }
-
   function aspectValue(aspect) {
     var parts = String(aspect).split(':');
     return parts.length === 2 ? Number(parts[0]) / Number(parts[1]) : 0;
   }
 
   function App() {
+    var self = this;
     this.state = 'idle';
     this.engine = new AVR.AudioEngine();
-    this.src = { screen: null, cam: null, mic: null };
     this.srcVideos = { screen: null, cam: null };
     this.compositor = null;
-    this.meter = null;
     this.mixer = null;
     this.session = null;
-    this.review = null;
     this.muted = false;
     this.cameraHidden = false;
     this.autoPaused = false;
@@ -75,41 +70,74 @@
     this.startToken = 0;
     this.countdownTimer = null;
     this.tickTimer = null;
-    this.meterFrame = 0;
-    this.meterWin = null;
-    this.peakHold = 0;
-    this.vizHistory = [];
+    this.cameraCount = null;
     this.installPrompt = null;
     this.warnedNoSystemAudio = false;
     this.els = this.collectElements();
-    this.library = new AVR.Library($('#library'), {
-      onPlay: this.openFromLibrary.bind(this),
-      onDeleted: this.onRecordingDeleted.bind(this),
-      onRenamed: this.onRecordingRenamed.bind(this),
+
+    this.sources = new AVR.Sources({
+      onEnded: function (kind) { self.onSourceEnded(kind); },
+      onMute: function (kind, track, muted) { self.onTrackMute(kind, track, muted); },
     });
     this.prompter = new AVR.Teleprompter($('#prompter'), S.prompter, AVR.saveSettings);
     this.floating = new AVR.FloatingControls($('#floatPanel'));
+    this.meterView = new AVR.MeterView({
+      meter: this.els.meter,
+      fill: this.els.meterFill,
+      peak: this.els.meterPeak,
+      db: this.els.meterDb,
+      floatFill: this.els.floatMeterFill,
+      viz: this.els.audioViz,
+    }, {
+      gain: function () { return self.sources.get('mic') ? S.micGain : 1; },
+      muted: function () { return self.muted && !!self.sources.get('mic'); },
+      recording: function () { return self.state === 'recording'; },
+      floatingWindow: function () { return self.floating.isOpen() ? self.floating.win : null; },
+    });
+    this.review = new AVR.Review({
+      deleted: function () {
+        self.library.refresh();
+        self.newRecording(false);
+      },
+      newRecording: function () { self.newRecording(); },
+      loaded: function () { self.updateStageAspect(); },
+      flash: function () { self.flash(); },
+    });
+    this.library = new AVR.Library($('#library'), {
+      onPlay: this.openFromLibrary.bind(this),
+      onDeleted: function (id) { if (self.review.item && self.review.item.id === id) self.newRecording(false); },
+      onRenamed: function (id, name) { self.review.rename(id, name); },
+    });
+    this.panel = new AVR.SettingsPanel(this.prompter, {
+      videoChanged: function () { self.onVideoSettingChanged(); },
+      qualityChanged: function () {},
+      deviceChanged: function (kind) { self.restartSource(kind); },
+      micProcessingChanged: function () { self.restartSource('mic'); },
+      mirrorChanged: function () { self.applyMirror(); },
+      systemAudioChanged: function () {
+        if (self.sources.get('screen') && self.state === 'preview') {
+          AVR.toast('This applies the next time you choose what to share.', 'info');
+        }
+      },
+      micGainChanged: function (gain) { if (self.mixer) self.mixer.setMicGain(gain); },
+      bubbleChanged: function () { if (self.compositor) self.compositor.draw(); },
+      prompterVisibilityChanged: function (visible) { self.setPrompterVisible(visible); },
+      outputSize: function () { return self.outputSize(); },
+    });
     this.init();
   }
 
   App.prototype.collectElements = function () {
     var ids = [
-      'envBanner', 'stage', 'previewVideo', 'canvasHost', 'audioViz', 'playbackVideo', 'stagePlaceholder',
-      'placeholderIcon', 'placeholderText', 'previewBtn', 'placeholderNote', 'stageBusy', 'busyText', 'countdown',
-      'countdownOverlay', 'stageFlash', 'recBadge', 'recBadgeLabel', 'recBadgeTime', 'stageChip', 'stageHint', 'meterRow', 'meterFill',
-      'meterPeak', 'meterDb', 'meter', 'meterIcon', 'recSize', 'muteBtn', 'flipBtn', 'camToggleBtn', 'recordBtn',
-      'pauseBtn', 'snapshotBtn', 'prompterBtn', 'popoutBtn', 'controlBar', 'reviewBar', 'reviewInfo', 'downloadBtn',
-      'shareBtn', 'frameBtn', 'wavBtn', 'deleteBtn', 'newBtn', 'videoSource', 'audioSource', 'mirrorCamera',
-      'systemAudio', 'systemAudioHint', 'permissionHint', 'resolution', 'fps', 'quality', 'aspect', 'videoFormat',
-      'audioFormat', 'qualityHint', 'micGain', 'micGainValue', 'noiseSuppression', 'echoCancellation',
-      'autoGainControl', 'prompterVisible', 'prompterScript', 'prompterSpeed', 'prompterSpeedValue', 'prompterSize',
-      'prompterSizeValue', 'prompterAutoStart', 'prompterMirror', 'prompterSettings', 'countdownBeep',
-      'floatingControls', 'floatingControlsField', 'helpBtn', 'helpDialog', 'installBtn', 'offlinePill', 'floatPanel',
-      'floatTime', 'floatStatus', 'floatMeterFill', 'floatPrompterSlot', 'sourceHost',
+      'envBanner', 'stage', 'previewVideo', 'canvasHost', 'audioViz', 'stagePlaceholder', 'placeholderIcon',
+      'placeholderText', 'previewBtn', 'placeholderNote', 'stageBusy', 'busyText', 'countdownOverlay', 'stageFlash',
+      'recBadge', 'recBadgeLabel', 'recBadgeTime', 'stageChip', 'stageHint', 'meterRow', 'meterFill', 'meterPeak',
+      'meterDb', 'meter', 'meterIcon', 'recSize', 'muteBtn', 'flipBtn', 'camToggleBtn', 'recordBtn', 'pauseBtn',
+      'snapshotBtn', 'prompterBtn', 'popoutBtn', 'controlBar', 'reviewBar', 'helpBtn', 'helpDialog', 'installBtn',
+      'offlinePill', 'floatPanel', 'floatTime', 'floatStatus', 'floatMeterFill', 'floatPrompterSlot', 'sourceHost',
     ];
     var els = {};
     ids.forEach(function (id) { els[id] = document.getElementById(id); });
-    els.countdownSelect = document.getElementById('countdown');
     return els;
   };
 
@@ -120,9 +148,7 @@
     this.checkEnvironment();
     this.bindModeTabs();
     this.bindControls();
-    this.bindSettings();
     this.bindGlobalEvents();
-    this.populateFormats();
 
     var requested = new URLSearchParams(location.search).get('mode');
     if (requested && MODES[requested]) S.mode = requested;
@@ -175,7 +201,7 @@
     if (this.blocked || mode.screen || this.state !== 'idle') return Promise.resolve();
     if (!navigator.permissions || !navigator.permissions.query) return Promise.resolve();
     var names = mode.cam ? ['camera'] : [];
-    if (S.audioDeviceId !== 'none') names.push('microphone');
+    if (this.sources.wantsMic()) names.push('microphone');
     return Promise.all(names.map(function (name) {
       return navigator.permissions.query({ name: name }).then(function (r) { return r.state; }, function () { return 'unknown'; });
     })).then(function (states) {
@@ -218,21 +244,10 @@
     e.prompterBtn.addEventListener('click', function () { self.setPrompterVisible(!S.prompter.visible); });
     e.popoutBtn.addEventListener('click', function () { self.toggleFloating(); });
 
-    e.downloadBtn.addEventListener('click', function () { self.downloadReview(); });
-    e.shareBtn.addEventListener('click', function () { self.shareReview(); });
-    e.frameBtn.addEventListener('click', function () { self.saveReviewFrame(); });
-    e.wavBtn.addEventListener('click', function () { self.reviewWav(); });
-    e.deleteBtn.addEventListener('click', function () { self.deleteReview(); });
-    e.newBtn.addEventListener('click', function () { self.newRecording(); });
-
-    this.prompter.onEdit = function () {
-      e.prompterSettings.open = true;
-      e.prompterScript.focus();
-      e.prompterSettings.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-    };
+    this.prompter.onEdit = function () { self.panel.openPrompterEditor(); };
     this.prompter.onClose = function () { self.setPrompterVisible(false); };
 
-    $('#floatPanel').addEventListener('click', function (ev) {
+    e.floatPanel.addEventListener('click', function (ev) {
       var btn = ev.target.closest ? ev.target.closest('[data-float]') : null;
       if (!btn) return;
       var action = btn.getAttribute('data-float');
@@ -247,11 +262,11 @@
         e.floatPrompterSlot.appendChild($('#prompter'));
         self.prompter.rehost();
       }
-      self.startMeterLoop();
+      self.meterView.start();
       self.render();
     };
     this.floating.onClose = function () {
-      var prompterEl = document.getElementById('prompter') || e.floatPrompterSlot.querySelector('#prompter');
+      var prompterEl = document.getElementById('prompter');
       if (prompterEl && prompterEl.parentNode !== e.stage) {
         e.stage.appendChild(prompterEl);
         self.prompter.rehost();
@@ -272,178 +287,6 @@
       e.installBtn.hidden = true;
       if (choice && choice.catch) choice.catch(function () {});
     });
-
-    e.playbackVideo.addEventListener('error', function () {
-      if (self.state === 'review') {
-        AVR.toast('This browser cannot preview this file, but you can still download it.', 'warning');
-      }
-    });
-  };
-
-  App.prototype.bindSettings = function () {
-    var self = this;
-    var e = this.els;
-
-    function select(el, key, parse, after) {
-      el.value = String(S[key]);
-      if (el.value !== String(S[key]) && el.options.length) S[key] = parse(el.value);
-      el.addEventListener('change', function () {
-        S[key] = parse(el.value);
-        AVR.saveSettings();
-        if (after) after();
-      });
-    }
-    function check(el, obj, key, after) {
-      el.checked = !!obj[key];
-      el.addEventListener('change', function () {
-        obj[key] = el.checked;
-        AVR.saveSettings();
-        if (after) after();
-      });
-    }
-    var str = function (v) { return v; };
-    var num = function (v) { return Number(v); };
-
-    select(e.resolution, 'resolution', str, function () { self.onVideoSettingChanged(); });
-    select(e.fps, 'fps', num, function () { self.onVideoSettingChanged(); });
-    select(e.quality, 'quality', str, function () { self.updateQualityHint(); });
-    select(e.aspect, 'aspect', str, function () { self.onVideoSettingChanged(); });
-    select(e.countdownSelect, 'countdown', num);
-
-    e.videoSource.addEventListener('change', function () {
-      S.videoDeviceId = e.videoSource.value;
-      AVR.saveSettings();
-      self.restartSource('cam');
-    });
-    e.audioSource.addEventListener('change', function () {
-      S.audioDeviceId = e.audioSource.value;
-      AVR.saveSettings();
-      self.restartSource('mic');
-    });
-
-    check(e.mirrorCamera, S, 'mirror', function () { self.applyMirror(); });
-    check(e.systemAudio, S, 'systemAudio', function () {
-      if (self.src.screen && self.state === 'preview') {
-        AVR.toast('This applies the next time you choose what to share.', 'info');
-      }
-    });
-    ['noiseSuppression', 'echoCancellation', 'autoGainControl'].forEach(function (key) {
-      check(e[key], S, key, function () { self.restartSource('mic'); });
-    });
-    check(e.countdownBeep, S, 'countdownBeep');
-    check(e.floatingControls, S, 'floatingControls');
-    e.floatingControlsField.hidden = !AVR.FloatingControls.supported();
-
-    e.micGain.value = Math.round(S.micGain * 100);
-    e.micGainValue.textContent = e.micGain.value + '%';
-    e.micGain.addEventListener('input', function () {
-      S.micGain = Number(e.micGain.value) / 100;
-      e.micGainValue.textContent = e.micGain.value + '%';
-      if (self.mixer) self.mixer.setMicGain(S.micGain);
-      AVR.saveSettings();
-    });
-
-    // Teleprompter
-    var p = S.prompter;
-    e.prompterScript.value = p.text;
-    e.prompterScript.addEventListener('input', function () {
-      p.text = e.prompterScript.value;
-      self.prompter.setText(p.text);
-      AVR.saveSettings();
-    });
-    check(e.prompterVisible, p, 'visible', function () { self.setPrompterVisible(p.visible); });
-    check(e.prompterAutoStart, p, 'autoStart');
-    check(e.prompterMirror, p, 'mirror', function () { self.prompter.applyStyle(); });
-    e.prompterSpeed.value = p.speed;
-    e.prompterSize.value = p.fontSize;
-    function syncPrompterOutputs() {
-      e.prompterSpeed.value = p.speed;
-      e.prompterSize.value = p.fontSize;
-      e.prompterSpeedValue.textContent = String(p.speed);
-      e.prompterSizeValue.textContent = p.fontSize + 'px';
-      e.prompterMirror.checked = !!p.mirror;
-    }
-    syncPrompterOutputs();
-    e.prompterSpeed.addEventListener('input', function () { self.prompter.setSpeed(Number(e.prompterSpeed.value)); syncPrompterOutputs(); });
-    e.prompterSize.addEventListener('input', function () { self.prompter.setFontSize(Number(e.prompterSize.value)); syncPrompterOutputs(); });
-    // Keep the settings panel in step with the on-stage toolbar.
-    var origApply = this.prompter.applyStyle.bind(this.prompter);
-    this.prompter.applyStyle = function () { origApply(); syncPrompterOutputs(); };
-
-    // Camera bubble
-    $$('.segmented[data-setting]').forEach(function (group) {
-      var path = group.getAttribute('data-setting').split('.');
-      function sync() {
-        $$('button', group).forEach(function (b) {
-          b.setAttribute('aria-checked', String(S[path[0]][path[1]] === b.getAttribute('data-value')));
-        });
-      }
-      group.addEventListener('click', function (ev) {
-        var b = ev.target.closest ? ev.target.closest('button[data-value]') : null;
-        if (!b) return;
-        S[path[0]][path[1]] = b.getAttribute('data-value');
-        AVR.saveSettings();
-        sync();
-        if (self.compositor) self.compositor.draw();
-      });
-      sync();
-    });
-    $$('.corner-picker button').forEach(function (b) {
-      b.addEventListener('click', function () {
-        var xy = b.getAttribute('data-corner').split(',');
-        S.bubble.x = Number(xy[0]);
-        S.bubble.y = Number(xy[1]);
-        AVR.saveSettings();
-        if (self.compositor) self.compositor.draw();
-      });
-    });
-
-    this.updateSystemAudioHint();
-  };
-
-  App.prototype.populateFormats = function () {
-    var e = this.els;
-    [['video', e.videoFormat, 'videoFormat'], ['audio', e.audioFormat, 'audioFormat']].forEach(function (row) {
-      var kind = row[0];
-      var el = row[1];
-      var key = row[2];
-      var list = AVR.formats.list(kind);
-      el.innerHTML = '';
-      var auto = document.createElement('option');
-      auto.value = 'auto';
-      auto.textContent = list.length ? 'Best for this device (' + list[0].label + ')' : 'Browser default';
-      el.appendChild(auto);
-      list.forEach(function (f) {
-        var o = document.createElement('option');
-        o.value = f.mime;
-        o.textContent = f.label;
-        el.appendChild(o);
-      });
-      el.value = S[key];
-      if (el.value !== S[key]) { el.value = 'auto'; S[key] = 'auto'; }
-      el.addEventListener('change', function () {
-        S[key] = el.value;
-        AVR.saveSettings();
-      });
-    });
-    this.updateQualityHint();
-  };
-
-  App.prototype.updateSystemAudioHint = function () {
-    var el = this.els.systemAudioHint;
-    if (P.isFirefox || P.isSafari) {
-      el.textContent = 'This browser can record your microphone but not sound playing on the computer. Use Chrome or Edge for that.';
-    } else {
-      el.textContent = 'In the sharing dialog, tick "Share audio" (for a tab, or the whole screen on Windows).';
-    }
-  };
-
-  App.prototype.updateQualityHint = function () {
-    var size = this.outputSize() || { width: AVR.formats.presetSize(S.resolution).long, height: AVR.formats.presetSize(S.resolution).short };
-    var bits = AVR.formats.videoBitrate(size.width, size.height, S.fps, S.quality) + AVR.formats.audioBitrate(S.quality);
-    var perMinute = (bits / 8) * 60;
-    this.els.qualityHint.textContent = 'About ' + AVR.formatBytes(perMinute) + ' per minute at most' +
-      (this.outputSize() ? ' (' + size.width + '×' + size.height + ')' : '') + '. Simple screens and still shots use much less.';
   };
 
   App.prototype.bindGlobalEvents = function () {
@@ -488,7 +331,7 @@
     window.addEventListener('offline', updateOnline);
     updateOnline();
 
-    window.addEventListener('resize', function () { self.sizeViz(); });
+    window.addEventListener('resize', function () { self.meterView.sizeViz(); });
   };
 
   App.prototype.onKey = function (ev) {
@@ -558,7 +401,7 @@
     var prev = S.mode;
     S.mode = mode;
     AVR.saveSettings();
-    if (this.state === 'review') this.clearReview();
+    if (this.state === 'review') this.review.clear();
     this.applyMode();
 
     var needs = MODES[mode];
@@ -570,10 +413,10 @@
     // shared screen) and release the rest, so the camera light goes off.
     if (!needs.screen) this.releaseSource('screen');
     if (!needs.cam) this.releaseSource('cam');
-    if (hadPreview && (!needs.screen || this.src.screen)) {
+    if (hadPreview && (!needs.screen || this.sources.get('screen'))) {
       this.startPreview();
     } else {
-      if (!this.src.screen) this.releaseAll();
+      if (!this.sources.get('screen')) this.releaseAll();
       this.setState('idle');
       if (!(MODES[prev].screen && needs.screen)) this.maybeAutoPreview();
     }
@@ -603,191 +446,29 @@
     el.classList.toggle('error', !!isError);
   };
 
-  // ---------------------------------------------------------------- devices
+  // ---------------------------------------------------------------- sources
 
   App.prototype.refreshDevices = function () {
     var self = this;
-    var md = navigator.mediaDevices;
-    if (!md || !md.enumerateDevices) return Promise.resolve();
-    return md.enumerateDevices().then(function (devices) {
-      var cams = devices.filter(function (d) { return d.kind === 'videoinput' && d.deviceId; });
-      var mics = devices.filter(function (d) {
-        return d.kind === 'audioinput' && d.deviceId && d.deviceId !== 'default' && d.deviceId !== 'communications';
-      });
-      var labelled = devices.some(function (d) { return !!d.label; });
-      self.els.permissionHint.hidden = labelled || !devices.length;
-
-      function fill(select, list, defaultLabel, prefix, extra) {
-        var current = select.value;
-        select.innerHTML = '';
-        var def = document.createElement('option');
-        def.value = '';
-        def.textContent = defaultLabel;
-        select.appendChild(def);
-        list.forEach(function (d, i) {
-          var o = document.createElement('option');
-          o.value = d.deviceId;
-          o.textContent = d.label || prefix + ' ' + (i + 1);
-          select.appendChild(o);
-        });
-        (extra || []).forEach(function (x) {
-          var o = document.createElement('option');
-          o.value = x.value;
-          o.textContent = x.label;
-          select.appendChild(o);
-        });
-        return current;
-      }
-      fill(self.els.videoSource, cams, P.isMobile ? 'Default (use Flip to switch)' : 'Default camera', 'Camera');
-      fill(self.els.audioSource, mics, 'Default microphone', 'Microphone', [{ value: 'none', label: 'No microphone' }]);
-      self.els.videoSource.value = S.videoDeviceId;
-      if (self.els.videoSource.value !== S.videoDeviceId) self.els.videoSource.value = '';
-      self.els.audioSource.value = S.audioDeviceId;
-      if (self.els.audioSource.value !== S.audioDeviceId) self.els.audioSource.value = '';
-
-      self.cameraCount = cams.length;
+    return this.sources.enumerate().then(function (list) {
+      self.panel.setDevices(list);
+      self.cameraCount = list.cams.length;
       self.render();
-    }).catch(function () { /* labels are a nicety */ });
+    }).catch(function () { /* device names are a nicety */ });
   };
-
-  App.prototype.videoConstraints = function () {
-    var size = AVR.formats.presetSize(S.resolution);
-    var c = {
-      width: { ideal: size.long },
-      height: { ideal: size.short },
-      frameRate: { ideal: S.fps },
-    };
-    if (S.videoDeviceId) c.deviceId = { exact: S.videoDeviceId };
-    else if (P.isMobile) c.facingMode = { ideal: S.facingMode };
-    return c;
-  };
-
-  App.prototype.audioConstraints = function () {
-    var c = {
-      echoCancellation: S.echoCancellation,
-      noiseSuppression: S.noiseSuppression,
-      autoGainControl: S.autoGainControl,
-    };
-    if (S.audioDeviceId && S.audioDeviceId !== 'none') c.deviceId = { exact: S.audioDeviceId };
-    return c;
-  };
-
-  function gum(constraints) {
-    return navigator.mediaDevices.getUserMedia(constraints);
-  }
-
-  // Retries with plainer constraints when a saved device has gone or the
-  // camera cannot do the requested size.
-  App.prototype.getCamera = function () {
-    var self = this;
-    return gum({ video: this.videoConstraints(), audio: false }).catch(function (err) {
-      if (err && (err.name === 'OverconstrainedError' || err.name === 'NotFoundError' || err.name === 'NotReadableError' || err.name === 'AbortError')) {
-        var loose = P.isMobile ? { facingMode: S.facingMode } : true;
-        return gum({ video: loose, audio: false }).then(function (s) {
-          if (S.videoDeviceId) {
-            S.videoDeviceId = '';
-            AVR.saveSettings();
-            self.els.videoSource.value = '';
-          }
-          return s;
-        }, function () { throw err; });
-      }
-      throw err;
-    });
-  };
-
-  App.prototype.getMic = function () {
-    var self = this;
-    return gum({ audio: this.audioConstraints(), video: false }).catch(function (err) {
-      if (err && (err.name === 'OverconstrainedError' || err.name === 'NotFoundError' || err.name === 'NotReadableError' || err.name === 'AbortError')) {
-        return gum({ audio: true, video: false }).then(function (s) {
-          if (S.audioDeviceId) {
-            S.audioDeviceId = '';
-            AVR.saveSettings();
-            self.els.audioSource.value = '';
-          }
-          return s;
-        }, function () { throw err; });
-      }
-      throw err;
-    });
-  };
-
-  // One permission prompt for both, where possible.
-  App.prototype.getCameraAndMic = function () {
-    var self = this;
-    return gum({ video: this.videoConstraints(), audio: this.audioConstraints() }).then(function (s) {
-      return {
-        cam: new MediaStream(s.getVideoTracks()),
-        mic: s.getAudioTracks().length ? new MediaStream(s.getAudioTracks()) : null,
-      };
-    }, function () {
-      // Find out which one failed, and keep the one that works.
-      return self.getCamera().then(function (cam) {
-        return self.getMic().then(function (mic) {
-          return { cam: cam, mic: mic };
-        }, function (micErr) {
-          return { cam: cam, mic: null, micError: micErr };
-        });
-      });
-    });
-  };
-
-  App.prototype.getScreen = function () {
-    var size = AVR.formats.presetSize(S.resolution);
-    var opts = {
-      video: {
-        width: { max: size.long },
-        height: { max: size.long },
-        frameRate: { ideal: S.fps, max: S.fps },
-      },
-      audio: S.systemAudio ? { echoCancellation: false, noiseSuppression: false, autoGainControl: false } : false,
-      selfBrowserSurface: 'exclude',
-      surfaceSwitching: 'include',
-      systemAudio: S.systemAudio ? 'include' : 'exclude',
-      monitorTypeSurfaces: 'include',
-    };
-    var md = navigator.mediaDevices;
-    return md.getDisplayMedia(opts).catch(function (err) {
-      // Older browsers reject options they don't know. Never retry after the
-      // person cancelled, or the picker would pop up again.
-      if (err && (err.name === 'TypeError' || err.name === 'OverconstrainedError' || err.name === 'NotSupportedError')) {
-        return md.getDisplayMedia({ video: true, audio: !!S.systemAudio });
-      }
-      throw err;
-    });
-  };
-
-  // ---------------------------------------------------------------- sources
 
   App.prototype.setSource = function (kind, stream) {
-    var self = this;
-    this.releaseSource(kind);
-    this.src[kind] = stream;
-    if (!stream) return;
-    stream.getTracks().forEach(function (track) {
-      track.addEventListener('ended', function () {
-        if (self.src[kind] === stream) self.onSourceEnded(kind, track);
-      });
-      track.addEventListener('mute', function () { if (self.src[kind] === stream) self.onTrackMute(kind, track, true); });
-      track.addEventListener('unmute', function () { if (self.src[kind] === stream) self.onTrackMute(kind, track, false); });
-    });
+    this.releaseVideoEl(kind);
+    this.sources.set(kind, stream);
     if (kind === 'mic') {
-      var mic = firstTrack(stream, 'audio');
+      var mic = this.sources.track('mic');
       if (mic) mic.enabled = !this.muted;
     }
   };
 
   App.prototype.releaseSource = function (kind) {
-    var stream = this.src[kind];
-    this.src[kind] = null;
-    stopStream(stream);
-    var v = this.srcVideos[kind];
-    if (v) {
-      v.srcObject = null;
-      v.remove();
-      this.srcVideos[kind] = null;
-    }
+    this.releaseVideoEl(kind);
+    this.sources.release(kind);
   };
 
   App.prototype.releaseAll = function () {
@@ -799,12 +480,9 @@
 
   App.prototype.hasLiveSources = function () {
     var m = MODES[S.mode];
-    var live = function (s) {
-      return !!s && s.getTracks().some(function (t) { return t.readyState === 'live'; });
-    };
-    if (m.screen) return live(this.src.screen);
-    if (m.cam) return live(this.src.cam);
-    return live(this.src.mic);
+    if (m.screen) return this.sources.isLive('screen');
+    if (m.cam) return this.sources.isLive('cam');
+    return this.sources.isLive('mic');
   };
 
   App.prototype.startPreview = function () {
@@ -812,10 +490,11 @@
     if (this.blocked || LIVE_STATES[this.state]) return Promise.resolve(false);
     var mode = S.mode;
     var need = MODES[mode];
-    var wantMic = S.audioDeviceId !== 'none';
+    var src = this.sources;
+    var wantMic = src.wantsMic();
     var token = ++this.startToken;
     var stale = function () { return token !== self.startToken; };
-    if (this.state === 'review') this.clearReview();
+    if (this.state === 'review') this.review.clear();
     this.teardownPipeline();
     this.setState('starting');
     this.setPlaceholderNote('');
@@ -828,9 +507,9 @@
     var chain = Promise.resolve();
 
     // Ask for the screen first, while the click still counts as a user gesture.
-    if (need.screen && !this.src.screen) {
+    if (need.screen && !src.get('screen')) {
       chain = chain.then(function () {
-        return self.getScreen().then(function (s) {
+        return src.getScreen().then(function (s) {
           if (stale()) { stopStream(s); return; }
           self.setSource('screen', s);
           self.checkSystemAudio(s);
@@ -843,18 +522,19 @@
 
     chain = chain.then(function () {
       if (stale()) return;
-      var needCam = need.cam && !self.src.cam;
-      var needMic = wantMic && !self.src.mic;
+      var needCam = need.cam && !src.get('cam');
+      var needMic = wantMic && !src.get('mic');
+      var screenOnly = 'Camera unavailable, so this will record the screen only. ';
       if (needCam && needMic) {
-        return self.getCameraAndMic().then(function (r) {
+        return src.getCameraAndMic().then(function (r) {
           if (stale()) { stopStream(r.cam); stopStream(r.mic); return; }
           self.setSource('cam', r.cam);
           self.setSource('mic', r.mic);
           if (r.micError) warnings.push('Recording without a microphone. ' + AVR.describeMediaError(r.micError, 'microphone'));
         }, function (err) {
           if (mode === 'screencam') {
-            warnings.push('Camera unavailable, so this will record the screen only. ' + AVR.describeMediaError(err, 'camera'));
-            return self.getMic().then(function (mic) {
+            warnings.push(screenOnly + AVR.describeMediaError(err, 'camera'));
+            return src.getMic().then(function (mic) {
               if (stale()) { stopStream(mic); return; }
               self.setSource('mic', mic);
             }, function () {});
@@ -864,12 +544,12 @@
         });
       }
       if (needCam) {
-        return self.getCamera().then(function (cam) {
+        return src.getCamera().then(function (cam) {
           if (stale()) { stopStream(cam); return; }
           self.setSource('cam', cam);
         }, function (err) {
           if (mode === 'screencam') {
-            warnings.push('Camera unavailable, so this will record the screen only. ' + AVR.describeMediaError(err, 'camera'));
+            warnings.push(screenOnly + AVR.describeMediaError(err, 'camera'));
             return;
           }
           err.what = 'camera';
@@ -877,7 +557,7 @@
         });
       }
       if (needMic) {
-        return self.getMic().then(function (mic) {
+        return src.getMic().then(function (mic) {
           if (stale()) { stopStream(mic); return; }
           self.setSource('mic', mic);
         }, function (err) {
@@ -927,7 +607,8 @@
     if (this.state !== 'preview') return;
     if (kind === 'cam' && !MODES[S.mode].cam) return;
     var token = ++this.startToken;
-    var getter = kind === 'cam' ? this.getCamera() : (S.audioDeviceId === 'none' ? Promise.resolve(null) : this.getMic());
+    var src = this.sources;
+    var getter = kind === 'cam' ? src.getCamera() : (src.wantsMic() ? src.getMic() : Promise.resolve(null));
     this.releaseSource(kind);
     this.teardownPipeline();
     this.setState('starting');
@@ -951,20 +632,13 @@
   };
 
   App.prototype.onVideoSettingChanged = function () {
-    this.updateQualityHint();
     if (this.state !== 'preview') return;
-    var screenTrack = firstTrack(this.src.screen, 'video');
-    if (screenTrack && screenTrack.applyConstraints) {
-      var size = AVR.formats.presetSize(S.resolution);
-      screenTrack.applyConstraints({
-        width: { max: size.long }, height: { max: size.long }, frameRate: { ideal: S.fps, max: S.fps },
-      }).catch(function () {});
-    }
+    var self = this;
+    this.sources.retuneScreen();
     if (MODES[S.mode].cam) this.restartSource('cam');
-    else if (this.src.screen) {
-      var self = this;
+    else if (this.sources.get('screen')) {
       setTimeout(function () {
-        if (self.state === 'preview') { self.teardownPipeline(); self.buildPipeline(); }
+        if (self.state === 'preview') self.buildPipeline();
       }, 300);
     }
   };
@@ -973,10 +647,9 @@
     if (this.state !== 'preview' && this.state !== 'idle') return;
     S.facingMode = S.facingMode === 'user' ? 'environment' : 'user';
     S.videoDeviceId = '';
-    this.els.videoSource.value = '';
     S.mirror = S.facingMode === 'user';
-    this.els.mirrorCamera.checked = S.mirror;
     AVR.saveSettings();
+    this.panel.syncDevices();
     if (this.state === 'preview') this.restartSource('cam');
   };
 
@@ -1014,7 +687,6 @@
         this.setState('idle');
         if (kind !== 'screen') this.setPlaceholderNote(kind === 'cam' ? 'The camera disconnected.' : 'The microphone disconnected.', true);
       } else {
-        this.teardownPipeline();
         var self = this;
         this.buildPipeline().then(function () { self.render(); });
       }
@@ -1040,7 +712,7 @@
     if (visible) {
       if (LIVE_STATES[this.state] || this.state === 'preview') this.acquireWakeLock();
       if (this.state === 'paused' && this.autoPaused) {
-        var cam = firstTrack(this.src.cam, 'video');
+        var cam = this.sources.track('cam');
         if (!cam || !cam.muted) {
           if (this.resume()) AVR.toast('Recording resumed.', 'success');
         }
@@ -1050,36 +722,46 @@
     }
     // Animation frames stop in a hidden tab; move the meter to the floating
     // window (if open) or restart it on return.
-    this.startMeterLoop();
+    this.meterView.start();
   };
 
   // ---------------------------------------------------------------- pipeline
 
+  // A hidden <video> that feeds a source into the compositor. Started with
+  // play(), not autoplay: Chrome pauses muted autoplay videos that are off
+  // screen, and these are deliberately tiny and hidden.
   App.prototype.sourceVideo = function (kind) {
     if (this.srcVideos[kind]) return this.srcVideos[kind];
     var v = document.createElement('video');
     v.muted = true;
     v.playsInline = true;
     v.setAttribute('playsinline', '');
-    // Started with play(), not autoplay: Chrome pauses muted autoplay videos
-    // that are off screen, and these are deliberately tiny and hidden.
-    v.srcObject = new MediaStream(this.src[kind].getVideoTracks());
+    v.srcObject = new MediaStream(this.sources.get(kind).getVideoTracks());
     this.els.sourceHost.appendChild(v);
     AVR.playSafely(v);
     this.srcVideos[kind] = v;
     return v;
   };
 
+  App.prototype.releaseVideoEl = function (kind) {
+    var v = this.srcVideos[kind];
+    if (!v) return;
+    v.srcObject = null;
+    v.remove();
+    this.srcVideos[kind] = null;
+  };
+
   App.prototype.buildPipeline = function () {
     var self = this;
     var e = this.els;
     var mode = S.mode;
+    var src = this.sources;
     this.teardownPipeline();
     var size = AVR.formats.presetSize(S.resolution);
     var waitFor = Promise.resolve();
 
-    if (mode === 'camera' && this.src.cam) {
-      var camTrack = firstTrack(this.src.cam, 'video');
+    if (mode === 'camera' && src.get('cam')) {
+      var camTrack = src.track('cam');
       var target = aspectValue(S.aspect);
       var st = camTrack && camTrack.getSettings ? camTrack.getSettings() : {};
       var actual = st.width && st.height ? st.width / st.height : 0;
@@ -1090,40 +772,37 @@
           self.makeCompositor({ width: crop.width, height: crop.height, layout: 'fill', main: camVideo });
         });
       } else {
-        e.previewVideo.srcObject = this.src.cam;
+        e.previewVideo.srcObject = src.get('cam');
         e.previewVideo.hidden = false;
         AVR.playSafely(e.previewVideo);
         waitFor = AVR.waitForVideo(e.previewVideo);
       }
-    } else if (mode === 'screencam' && this.src.screen && this.src.cam) {
+    } else if (mode === 'screencam' && src.get('screen') && src.get('cam')) {
       var screenVideo = this.sourceVideo('screen');
       var camVid = this.sourceVideo('cam');
       waitFor = Promise.all([AVR.waitForVideo(screenVideo), AVR.waitForVideo(camVid, 3000)]).then(function () {
         var fit = AVR.Compositor.fitSize(screenVideo.videoWidth || 1920, screenVideo.videoHeight || 1080, size.long);
         self.makeCompositor({ width: fit.width, height: fit.height, layout: 'bubble', main: screenVideo, camera: camVid });
       });
-    } else if (MODES[mode].screen && this.src.screen) {
-      e.previewVideo.srcObject = new MediaStream(this.src.screen.getVideoTracks());
+    } else if (MODES[mode].screen && src.get('screen')) {
+      e.previewVideo.srcObject = new MediaStream(src.get('screen').getVideoTracks());
       e.previewVideo.hidden = false;
       AVR.playSafely(e.previewVideo);
       waitFor = AVR.waitForVideo(e.previewVideo);
     } else if (mode === 'audio') {
-      e.audioViz.hidden = false;
-      this.vizHistory = [];
-      this.sizeViz();
+      this.meterView.showViz(true);
     }
 
-    var meterTrack = firstTrack(this.src.mic, 'audio') || firstTrack(this.src.screen, 'audio');
-    this.meter = this.engine.meter(meterTrack);
-    this.els.meterIcon.setAttribute('href', this.src.mic ? '#i-microphone' : '#i-speaker-high');
-    this.startMeterLoop();
+    var meterTrack = src.track('mic') || src.track('screen', 'audio');
+    this.meterView.attach(this.engine.meter(meterTrack));
+    e.meterIcon.setAttribute('href', src.get('mic') ? '#i-microphone' : '#i-speaker-high');
 
     if (mode === 'camera' || mode === 'audio') this.acquireWakeLock();
 
     return waitFor.then(function () {
       self.applyMirror();
       self.updateStageAspect();
-      self.updateQualityHint();
+      self.panel.updateQualityHint();
     });
   };
 
@@ -1158,25 +837,12 @@
     e.canvasHost.hidden = true;
     e.previewVideo.srcObject = null;
     e.previewVideo.hidden = true;
-    e.audioViz.hidden = true;
-    if (this.meter) {
-      this.meter.dispose();
-      this.meter = null;
-    }
-    this.stopMeterLoop();
-    this.resetMeter();
+    this.meterView.showViz(false);
+    this.meterView.detach();
     // Source <video> elements that no longer feed anything can go.
     var m = MODES[S.mode];
     if (this.srcVideos.screen && !m.screen) this.releaseVideoEl('screen');
     if (this.srcVideos.cam && !(m.cam && (S.mode === 'screencam' || S.aspect !== 'auto'))) this.releaseVideoEl('cam');
-  };
-
-  App.prototype.releaseVideoEl = function (kind) {
-    var v = this.srcVideos[kind];
-    if (!v) return;
-    v.srcObject = null;
-    v.remove();
-    this.srcVideos[kind] = null;
   };
 
   App.prototype.applyMirror = function () {
@@ -1200,10 +866,7 @@
   App.prototype.updateStageAspect = function () {
     var size = this.outputSize();
     var ratio = size ? size.width / size.height : 16 / 9;
-    if (this.state === 'review') {
-      var pv = this.els.playbackVideo;
-      ratio = pv.videoWidth ? pv.videoWidth / pv.videoHeight : 16 / 9;
-    }
+    if (this.state === 'review') ratio = this.review.aspect() || 16 / 9;
     ratio = Math.min(2.4, Math.max(0.5, ratio || 16 / 9));
     this.els.stage.style.setProperty('--stage-ar', ratio.toFixed(4));
     var chip = this.els.stageChip;
@@ -1213,97 +876,6 @@
     } else {
       chip.hidden = true;
     }
-  };
-
-  // ---------------------------------------------------------------- meter
-
-  App.prototype.startMeterLoop = function () {
-    var self = this;
-    this.stopMeterLoop();
-    if (!this.meter) return;
-    var step = function () {
-      self.meterFrame = 0;
-      self.drawMeter();
-      var win = window;
-      if (document.visibilityState !== 'visible' && self.floating.isOpen()) win = self.floating.win;
-      if (document.visibilityState !== 'visible' && win === window) return;
-      self.meterWin = win;
-      self.meterFrame = win.requestAnimationFrame(step);
-    };
-    step();
-  };
-
-  App.prototype.stopMeterLoop = function () {
-    if (this.meterFrame && this.meterWin) {
-      try { this.meterWin.cancelAnimationFrame(this.meterFrame); } catch (e) { /* closed */ }
-    }
-    this.meterFrame = 0;
-  };
-
-  App.prototype.resetMeter = function () {
-    this.els.meterFill.style.transform = 'scaleX(0)';
-    this.els.meterPeak.style.left = '0%';
-    this.els.meterDb.textContent = '–∞ dB';
-    this.els.floatMeterFill.style.transform = 'scaleX(0)';
-    this.peakHold = 0;
-  };
-
-  App.prototype.drawMeter = function () {
-    if (!this.meter) return;
-    var level = this.meter.read();
-    var gain = this.src.mic ? S.micGain : 1;
-    var muted = this.muted && this.src.mic;
-    var peak = muted ? 0 : Math.min(1, level.peak * gain);
-    // Below -60 dBFS is silence for our purposes.
-    var db = peak > 0.001 ? 20 * Math.log(peak) / Math.LN10 : -Infinity;
-    var pos = db === -Infinity ? 0 : Math.max(0, Math.min(1, (db + 60) / 60));
-    this.peakHold = Math.max(pos, this.peakHold - 0.006);
-    var e = this.els;
-    var scale = 'scaleX(' + pos.toFixed(3) + ')';
-    e.meterFill.style.transform = scale;
-    e.floatMeterFill.style.transform = scale;
-    e.meterPeak.style.left = (this.peakHold * 100).toFixed(1) + '%';
-    var cls = db > -1 ? 'clip' : db > -9 ? 'hot' : '';
-    e.meter.className = 'meter ' + cls;
-    e.meterDb.textContent = muted ? 'Muted' : db === -Infinity ? '–∞ dB' : Math.round(db) + ' dB';
-    e.meter.setAttribute('aria-valuenow', db === -Infinity ? '-60' : String(Math.round(Math.max(-60, db))));
-    if (!e.audioViz.hidden) this.drawViz(pos, cls);
-  };
-
-  App.prototype.sizeViz = function () {
-    var c = this.els.audioViz;
-    if (c.hidden) return;
-    var ratio = Math.min(2, window.devicePixelRatio || 1);
-    var rect = c.getBoundingClientRect();
-    c.width = Math.max(1, Math.round(rect.width * ratio));
-    c.height = Math.max(1, Math.round(rect.height * ratio));
-  };
-
-  // A scrolling level history: easy to read at a glance, and it makes gaps
-  // and clipping obvious.
-  App.prototype.drawViz = function (pos, cls) {
-    var c = this.els.audioViz;
-    var ctx = c.getContext('2d');
-    var W = c.width;
-    var H = c.height;
-    if (!W || !H) return;
-    var bar = Math.max(3, Math.round(W / 140));
-    var gap = Math.max(1, Math.round(bar / 2));
-    var max = Math.ceil(W / (bar + gap));
-    this.vizHistory.push({ v: pos, cls: cls });
-    if (this.vizHistory.length > max) this.vizHistory.splice(0, this.vizHistory.length - max);
-    ctx.clearRect(0, 0, W, H);
-    var mid = H / 2;
-    var live = this.state === 'recording';
-    for (var i = 0; i < this.vizHistory.length; i++) {
-      var item = this.vizHistory[this.vizHistory.length - 1 - i];
-      var x = W - (i + 1) * (bar + gap);
-      var h = Math.max(2, item.v * item.v * H * 0.9);
-      ctx.fillStyle = item.cls === 'clip' ? '#ef4444' : item.cls === 'hot' ? '#f59e0b' : live ? '#f87171' : '#60a5fa';
-      ctx.globalAlpha = 0.35 + 0.65 * (1 - i / max);
-      ctx.fillRect(x, mid - h / 2, bar, h);
-    }
-    ctx.globalAlpha = 1;
   };
 
   // ---------------------------------------------------------------- record
@@ -1413,15 +985,16 @@
   App.prototype.buildOutputStream = function () {
     var tracks = [];
     var mode = S.mode;
+    var src = this.sources;
     if (mode !== 'audio') {
       var video = null;
-      if (this.compositor) video = firstTrack(this.compositor.captureStream(), 'video');
-      else if (mode === 'camera') video = firstTrack(this.src.cam, 'video');
-      else video = firstTrack(this.src.screen, 'video');
+      if (this.compositor) video = AVR.Sources.firstTrack(this.compositor.captureStream(), 'video');
+      else if (mode === 'camera') video = src.track('cam');
+      else video = src.track('screen');
       if (video) tracks.push(video);
     }
-    var mic = firstTrack(this.src.mic, 'audio');
-    var sys = firstTrack(this.src.screen, 'audio');
+    var mic = src.track('mic');
+    var sys = src.track('screen', 'audio');
     var audio = null;
     // Mix only when needed: two sources, or a volume change. A plain
     // microphone track is the most reliable thing to hand the recorder.
@@ -1539,13 +1112,13 @@
   };
 
   App.prototype.toggleMute = function () {
-    if (!this.src.mic) {
-      if (S.mode !== 'screen' && S.mode !== 'screencam') AVR.toast('No microphone is active.', 'info');
+    var mic = this.sources.track('mic');
+    if (!mic) {
+      if (!MODES[S.mode].screen) AVR.toast('No microphone is active.', 'info');
       return;
     }
     this.muted = !this.muted;
-    var mic = firstTrack(this.src.mic, 'audio');
-    if (mic) mic.enabled = !this.muted;
+    mic.enabled = !this.muted;
     this.render();
     AVR.toast(this.muted ? 'Microphone muted' : 'Microphone on', this.muted ? 'warning' : 'success', { timeout: 1800 });
   };
@@ -1565,12 +1138,15 @@
     this.prompter.pause();
     this.stopTicker();
     this.setState('saving');
-    session.stop().then(function (result) {
+    function cleanUp() {
       self.session = null;
       self.disposeMixer();
       self.releaseAll();
       self.releaseWakeLock();
       self.floating.close();
+    }
+    session.stop().then(function (result) {
+      cleanUp();
       self.showReview(result, result.blob);
       self.library.refresh();
       if (result.saved) {
@@ -1579,11 +1155,7 @@
         AVR.toast('Recording ready, but it could not be saved in this browser. Download it now so you don\'t lose it.', 'warning', { timeout: 15000 });
       }
     }).catch(function (err) {
-      self.session = null;
-      self.disposeMixer();
-      self.releaseAll();
-      self.releaseWakeLock();
-      self.floating.close();
+      cleanUp();
       self.setState('idle');
       self.library.refresh();
       AVR.toast('Recording failed: ' + ((err && err.message) || 'unknown error'), 'error', { timeout: 12000 });
@@ -1624,34 +1196,16 @@
 
   App.prototype.snapshot = function () {
     var self = this;
-    if (S.mode === 'audio' && this.state !== 'review') return;
-    if (this.state === 'review') { this.saveReviewFrame(); return; }
+    if (this.state === 'review') { this.review.saveFrame(); return; }
+    if (S.mode === 'audio') return;
     if (!(this.state === 'preview' || this.state === 'recording' || this.state === 'paused' || this.state === 'countdown')) return;
-    var blobPromise;
-    if (this.compositor) {
-      blobPromise = this.compositor.snapshot('image/png');
-    } else {
-      blobPromise = this.frameToPng(this.els.previewVideo);
-    }
+    var blobPromise = this.compositor ? this.compositor.snapshot('image/png') : AVR.frameToPng(this.els.previewVideo);
     blobPromise.then(function (blob) {
       if (!blob) throw new Error('empty');
       AVR.downloadBlob(blob, 'Snapshot ' + AVR.stamp() + '.png');
       self.flash();
     }).catch(function () {
       AVR.toast('Could not capture an image.', 'error');
-    });
-  };
-
-  App.prototype.frameToPng = function (video) {
-    return new Promise(function (resolve, reject) {
-      var w = video.videoWidth;
-      var h = video.videoHeight;
-      if (!w || !h) return reject(new Error('No picture'));
-      var c = document.createElement('canvas');
-      c.width = w;
-      c.height = h;
-      c.getContext('2d').drawImage(video, 0, 0, w, h);
-      c.toBlob(resolve, 'image/png');
     });
   };
 
@@ -1665,106 +1219,13 @@
   // ---------------------------------------------------------------- review
 
   App.prototype.showReview = function (info, blob) {
-    this.clearReview();
-    var e = this.els;
-    this.review = {
-      id: info.id,
-      name: info.name,
-      ext: info.ext,
-      kind: info.kind || (info.mode === 'audio' ? 'audio' : 'video'),
-      durationMs: info.durationMs,
-      blob: blob,
-      url: URL.createObjectURL(blob),
-      saved: info.saved !== false,
-    };
     this.teardownPipeline();
-    e.playbackVideo.src = this.review.url;
-    e.playbackVideo.hidden = false;
-    e.stage.classList.toggle('is-audio', this.review.kind === 'audio');
-    var self = this;
-    e.playbackVideo.onloadedmetadata = function () { self.updateStageAspect(); };
+    this.review.show(info, blob);
     this.setState('review');
   };
 
-  App.prototype.clearReview = function () {
-    var e = this.els;
-    if (this.review) {
-      URL.revokeObjectURL(this.review.url);
-      this.review = null;
-    }
-    e.playbackVideo.onloadedmetadata = null;
-    e.playbackVideo.pause();
-    e.playbackVideo.removeAttribute('src');
-    try { e.playbackVideo.load(); } catch (err) { /* ignore */ }
-    e.playbackVideo.hidden = true;
-    e.stage.classList.remove('is-audio');
-  };
-
-  App.prototype.reviewFileName = function (ext) {
-    return AVR.safeFilename(this.review.name) + '.' + (ext || this.review.ext);
-  };
-
-  App.prototype.downloadReview = function () {
-    if (!this.review) return;
-    AVR.downloadBlob(this.review.blob, this.reviewFileName());
-  };
-
-  App.prototype.shareReview = function () {
-    var r = this.review;
-    if (!r) return;
-    var name = this.reviewFileName();
-    if (!AVR.canShareFile(r.blob, name)) {
-      AVR.toast('This device cannot share this file. Use Download instead.', 'warning');
-      return;
-    }
-    AVR.shareFile(r.blob, name, r.name).catch(function (err) {
-      if (err && err.name === 'AbortError') return;
-      AVR.toast('Sharing failed: ' + ((err && err.message) || 'unknown error'), 'error');
-    });
-  };
-
-  App.prototype.saveReviewFrame = function () {
-    var self = this;
-    if (!this.review || this.review.kind === 'audio') return;
-    this.frameToPng(this.els.playbackVideo).then(function (blob) {
-      var t = AVR.formatDuration(self.els.playbackVideo.currentTime * 1000).replace(/:/g, '.');
-      AVR.downloadBlob(blob, AVR.safeFilename(self.review.name + ' frame ' + t) + '.png');
-      self.flash();
-    }).catch(function () {
-      AVR.toast('Play or seek the video to the frame you want first.', 'info');
-    });
-  };
-
-  App.prototype.reviewWav = function () {
-    var self = this;
-    var r = this.review;
-    if (!r) return;
-    var btn = this.els.wavBtn;
-    btn.disabled = true;
-    btn.classList.add('busy');
-    AVR.wav.fromBlob(r.blob).then(function (wav) {
-      AVR.downloadBlob(wav, self.reviewFileName('wav'));
-    }).catch(function () {
-      AVR.toast('Could not convert this recording to WAV in this browser.', 'error');
-    }).then(function () {
-      btn.disabled = false;
-      btn.classList.remove('busy');
-    });
-  };
-
-  App.prototype.deleteReview = function () {
-    var r = this.review;
-    if (!r) return;
-    if (!window.confirm('Delete this recording? This cannot be undone.')) return;
-    var self = this;
-    AVR.store.deleteRecording(r.id).catch(function () {}).then(function () {
-      self.library.refresh();
-      self.newRecording(false);
-    });
-  };
-
   App.prototype.newRecording = function (autoPreview) {
-    this.clearReview();
+    this.review.clear();
     this.setState('idle');
     if (autoPreview !== false && !MODES[S.mode].screen) this.startPreview();
   };
@@ -1788,22 +1249,11 @@
         saved: true,
       }, blob);
       self.els.stage.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-      AVR.playSafely(self.els.playbackVideo);
+      self.review.play();
     }).catch(function (err) {
       AVR.toast(err.message || 'Could not open the recording.', 'error');
       self.library.refresh();
     });
-  };
-
-  App.prototype.onRecordingDeleted = function (id) {
-    if (this.review && this.review.id === id) this.newRecording(false);
-  };
-
-  App.prototype.onRecordingRenamed = function (id, name) {
-    if (this.review && this.review.id === id) {
-      this.review.name = name;
-      this.render();
-    }
   };
 
   // ---------------------------------------------------------------- misc
@@ -1811,7 +1261,7 @@
   App.prototype.setPrompterVisible = function (visible) {
     S.prompter.visible = !!visible;
     AVR.saveSettings();
-    this.els.prompterVisible.checked = !!visible;
+    this.panel.syncPrompter();
     this.prompter.show(!!visible);
     this.render();
   };
@@ -1844,6 +1294,10 @@
     this.render();
   };
 
+  function setCtl(btn, icon, label) {
+    btn.innerHTML = AVR.icon(icon) + '<span class="ctl-label">' + label + '</span>';
+  }
+
   // One place that maps state to what is on screen.
   App.prototype.render = function () {
     var e = this.els;
@@ -1852,18 +1306,21 @@
     var m = MODES[mode];
     var live = st === 'recording' || st === 'paused';
     var hasPreview = st === 'preview' || st === 'countdown' || live;
+    var hasMic = !!this.sources.get('mic');
+    var bubble = !!(this.compositor && this.compositor.layout === 'bubble');
 
+    // Stage
     e.stage.dataset.state = st;
     e.stagePlaceholder.hidden = st !== 'idle';
     e.stageBusy.hidden = !(st === 'starting' || st === 'saving');
-    e.busyText.textContent = st === 'saving' ? 'Saving your recording…' : (m.screen && !this.src.screen ? 'Waiting for you to choose what to share…' : 'Starting…');
+    e.busyText.textContent = st === 'saving' ? 'Saving your recording…'
+      : (m.screen && !this.sources.get('screen') ? 'Waiting for you to choose what to share…' : 'Starting…');
     e.previewBtn.disabled = this.blocked;
     if (st !== 'countdown') e.countdownOverlay.hidden = true;
-
     e.recBadge.hidden = !live;
     e.recBadge.classList.toggle('paused', st === 'paused');
     e.recBadgeLabel.textContent = st === 'paused' ? (this.autoPaused ? 'PAUSED (interrupted)' : 'PAUSED') : 'REC';
-    e.stageHint.hidden = !(st === 'preview' && this.compositor && this.compositor.layout === 'bubble' && !this.cameraHidden);
+    e.stageHint.hidden = !(st === 'preview' && bubble && !this.cameraHidden);
 
     // Control bar
     e.controlBar.hidden = st === 'review';
@@ -1878,25 +1335,21 @@
       live ? 'Stop recording (R)' : st === 'countdown' ? 'Cancel countdown (Esc)' : 'Start recording (R)');
 
     e.pauseBtn.disabled = !live;
-    e.pauseBtn.innerHTML = AVR.icon(st === 'paused' ? 'play-fill' : 'pause-fill') +
-      '<span class="ctl-label">' + (st === 'paused' ? 'Resume' : 'Pause') + '</span>';
+    setCtl(e.pauseBtn, st === 'paused' ? 'play-fill' : 'pause-fill', st === 'paused' ? 'Resume' : 'Pause');
     e.pauseBtn.classList.toggle('active', st === 'paused');
 
-    var hasMic = !!this.src.mic;
     e.muteBtn.disabled = !hasMic;
     e.muteBtn.setAttribute('aria-pressed', String(this.muted));
     e.muteBtn.classList.toggle('danger', this.muted);
-    e.muteBtn.innerHTML = AVR.icon(this.muted ? 'microphone-slash-fill' : 'microphone') +
-      '<span class="ctl-label">' + (this.muted ? 'Unmute' : 'Mute') + '</span>';
+    setCtl(e.muteBtn, this.muted ? 'microphone-slash-fill' : 'microphone', this.muted ? 'Unmute' : 'Mute');
 
-    var bubble = !!(this.compositor && this.compositor.layout === 'bubble');
     e.camToggleBtn.hidden = mode !== 'screencam';
     e.camToggleBtn.disabled = !bubble;
     e.camToggleBtn.setAttribute('aria-pressed', String(this.cameraHidden));
-    e.camToggleBtn.innerHTML = AVR.icon(this.cameraHidden ? 'camera' : 'camera-slash') +
-      '<span class="ctl-label">' + (this.cameraHidden ? 'Show cam' : 'Hide cam') + '</span>';
+    setCtl(e.camToggleBtn, this.cameraHidden ? 'camera' : 'camera-slash', this.cameraHidden ? 'Show cam' : 'Hide cam');
 
-    e.flipBtn.hidden = !(P.isMobile && m.cam && (this.cameraCount || 0) !== 1);
+    // Flip only helps with more than one camera; before permission the count is unknown.
+    e.flipBtn.hidden = !(P.isMobile && m.cam && this.cameraCount !== 1 && this.cameraCount !== 0);
     e.flipBtn.disabled = live || st === 'countdown' || st === 'starting';
 
     e.snapshotBtn.disabled = mode === 'audio' || !hasPreview;
@@ -1907,14 +1360,17 @@
     e.popoutBtn.classList.toggle('active', this.floating.isOpen());
 
     // Settings that cannot change mid-recording
-    var lock = live || st === 'countdown' || st === 'saving' || st === 'starting';
+    this.panel.lock(live || st === 'countdown' || st === 'saving' || st === 'starting', live && !this.mixer);
     var lockModes = live || st === 'countdown' || st === 'saving';
-    [e.videoSource, e.audioSource, e.resolution, e.fps, e.quality, e.aspect, e.videoFormat, e.audioFormat,
-      e.noiseSuppression, e.echoCancellation, e.autoGainControl, e.systemAudio].forEach(function (el) { el.disabled = lock; });
-    e.micGain.disabled = live && !this.mixer;
     $$('.mode-tab').forEach(function (tab) { tab.classList.toggle('locked', lockModes); });
 
-    // Floating panel
+    this.renderFloating(st, live, hasMic, bubble);
+    if (st === 'review') this.review.render();
+    this.updateStageAspect();
+  };
+
+  App.prototype.renderFloating = function (st, live, hasMic, bubble) {
+    var e = this.els;
     var fp = e.floatPanel;
     var fRecord = $('[data-float="record"]', fp);
     var fPause = $('[data-float="pause"]', fp);
@@ -1923,31 +1379,15 @@
     e.floatStatus.classList.toggle('live', live);
     e.floatStatus.classList.toggle('paused', st === 'paused');
     if (!live && st !== 'countdown') e.floatTime.textContent = st === 'saving' ? 'Saving…' : 'Ready';
-    fRecord.innerHTML = AVR.icon(live ? 'stop-fill' : 'record-fill') + '<span class="ctl-label">' + (live ? 'Stop' : 'Record') + '</span>';
+    setCtl(fRecord, live ? 'stop-fill' : 'record-fill', live ? 'Stop' : 'Record');
     fRecord.disabled = !(live || st === 'preview' || st === 'countdown');
     fPause.disabled = !live;
-    fPause.innerHTML = AVR.icon(st === 'paused' ? 'play-fill' : 'pause-fill') + '<span class="ctl-label">' + (st === 'paused' ? 'Resume' : 'Pause') + '</span>';
+    setCtl(fPause, st === 'paused' ? 'play-fill' : 'pause-fill', st === 'paused' ? 'Resume' : 'Pause');
     fMute.disabled = !hasMic;
     fMute.classList.toggle('danger', this.muted);
-    fMute.innerHTML = AVR.icon(this.muted ? 'microphone-slash-fill' : 'microphone') + '<span class="ctl-label">' + (this.muted ? 'Unmute' : 'Mute') + '</span>';
+    setCtl(fMute, this.muted ? 'microphone-slash-fill' : 'microphone', this.muted ? 'Unmute' : 'Mute');
     fCam.hidden = !bubble;
-    fCam.innerHTML = AVR.icon(this.cameraHidden ? 'camera' : 'camera-slash') + '<span class="ctl-label">Cam</span>';
-
-    // Review
-    if (st === 'review' && this.review) {
-      var r = this.review;
-      e.reviewInfo.innerHTML = '';
-      var strong = document.createElement('strong');
-      strong.textContent = r.name;
-      e.reviewInfo.appendChild(strong);
-      e.reviewInfo.appendChild(document.createTextNode(
-        ' · ' + AVR.formatDuration(r.durationMs) + ' · ' + AVR.formatBytes(r.blob.size) + ' · ' + String(r.ext).toUpperCase() +
-        (r.saved ? '' : ' · not saved in browser, download it now')));
-      e.shareBtn.hidden = !AVR.canShareFile(r.blob, this.reviewFileName());
-      e.frameBtn.hidden = r.kind === 'audio';
-    }
-
-    this.updateStageAspect();
+    setCtl(fCam, this.cameraHidden ? 'camera' : 'camera-slash', 'Cam');
   };
 
   function boot() {
