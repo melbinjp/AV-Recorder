@@ -65,6 +65,7 @@ export default [
         // Browser globals inside page.evaluate() callbacks:
         'window', 'document', 'navigator', 'caches', 'Event', 'MediaStreamTrackProcessor', 'OfflineAudioContext',
         'Blob', 'Uint8Array', 'DataView', 'localStorage', 'sessionStorage',
+        'performance', 'requestAnimationFrame', 'MediaRecorder',
       ]),
     },
     rules: shared,

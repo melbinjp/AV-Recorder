@@ -192,25 +192,59 @@
     });
   }
 
-  // Returns a Blob with the duration set, or the original Blob unchanged if it
-  // cannot be patched. Never throws.
-  function fixDuration(blob, durationMs) {
-    if (!blob || !blob.size || !(durationMs > 0)) return Promise.resolve(blob);
-    var headLen = Math.min(blob.size, HEAD_BYTES);
-    function attempt() {
-      return readBytes(blob.slice(0, headLen)).then(function (buf) {
-        var patched = patchHead(new Uint8Array(buf), durationMs);
-        if (!patched) return blob;
-        return new Blob([patched, blob.slice(headLen)], { type: blob.type });
-      });
-    }
-    // One retry: reading a Blob can fail transiently (e.g. one backed by a
-    // file that is still being written).
-    return attempt().catch(function () {
-      return new Promise(function (r) { setTimeout(r, 100); }).then(attempt);
+  // Reads a Blob, retrying once: a read can fail transiently (e.g. a Blob
+  // backed by a file that is still being written).
+  function readWithRetry(blob) {
+    return readBytes(blob).catch(function () {
+      return new Promise(function (r) { setTimeout(r, 100); }).then(function () { return readBytes(blob); });
+    });
+  }
+
+  // Patches the header of a file that is stored as a list of chunks, the way
+  // MediaRecorder delivers it. The header can span several chunks: if the
+  // first frame arrives more than one timeslice after recording starts (a slow
+  // camera or a busy device), Chrome delivers the file's very first byte on
+  // its own. So the header is read across chunk boundaries, and the chunks it
+  // covers are replaced: the first by the patched bytes, the rest by empty
+  // chunks, so the count and order stay the same.
+  //
+  // Resolves {blobs, changed} (changed = indexes that differ), or null when
+  // there is nothing to patch or the layout can't be patched safely.
+  function fixDurationInChunks(blobs, durationMs) {
+    if (!blobs || !blobs.length || !(durationMs > 0)) return Promise.resolve(null);
+    var type = blobs[0].type;
+    var whole = new Blob(blobs, { type: type });
+    var headLen = Math.min(whole.size, HEAD_BYTES);
+    if (!headLen) return Promise.resolve(null);
+    return readWithRetry(whole.slice(0, headLen)).then(function (buf) {
+      var patched = patchHead(new Uint8Array(buf), durationMs);
+      if (!patched) return null;
+      var covered = 0;
+      var last = 0;
+      for (; last < blobs.length; last++) {
+        covered += blobs[last].size;
+        if (covered >= headLen) break;
+      }
+      last = Math.min(last, blobs.length - 1);
+      var out = blobs.slice();
+      var changed = [0];
+      out[0] = new Blob([patched, whole.slice(headLen, covered)], { type: type });
+      for (var i = 1; i <= last; i++) {
+        out[i] = new Blob([], { type: blobs[i].type });
+        changed.push(i);
+      }
+      return { blobs: out, changed: changed };
     }).catch(function (err) {
       if (AVR.log) AVR.log('warn', 'webm-header-read-failed', err);
-      return blob;
+      return null;
+    });
+  }
+
+  // Single-Blob form: resolves a Blob with the duration set, or the original
+  // Blob unchanged if it cannot be patched. Never rejects.
+  function fixDuration(blob, durationMs) {
+    return fixDurationInChunks(blob ? [blob] : [], durationMs).then(function (r) {
+      return r ? r.blobs[0] : blob;
     });
   }
 
@@ -253,5 +287,10 @@
     });
   }
 
-  AVR.webm = { fixDuration: fixDuration, readDuration: readDuration, _patchHead: patchHead };
+  AVR.webm = {
+    fixDuration: fixDuration,
+    fixDurationInChunks: fixDurationInChunks,
+    readDuration: readDuration,
+    HEAD_BYTES: HEAD_BYTES,
+  };
 })(window.AVR = window.AVR || {});

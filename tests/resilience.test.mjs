@@ -137,6 +137,96 @@ test('stopping a split second after starting keeps the preview and says why', as
   await context.close();
 });
 
+test('a slow first frame (camera warm-up) still gives the file its duration', async () => {
+  const { page, errors, context } = await openApp(browser, server.url);
+  // Drive a real RecordingSession with a source that sends no frames for the
+  // first 1.5 s, as a phone camera warming up does. Chrome then delivers the
+  // file header split across chunks, starting with a single byte.
+  const r = await page.evaluate(async () => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 640;
+    canvas.height = 360;
+    const ctx = canvas.getContext('2d');
+    const stream = canvas.captureStream(30);
+    const session = new window.AVR.RecordingSession({
+      stream, kind: 'video', mode: 'camera', name: 'Warm-up test',
+      format: window.AVR.formats.pick('video', 'video/webm;codecs=vp9,opus'), videoBitsPerSecond: 2e6,
+    });
+    await session.start();
+    await new Promise((res) => setTimeout(res, 1500));
+    const t0 = performance.now();
+    await new Promise((res) => {
+      (function draw() {
+        ctx.fillStyle = `hsl(${(performance.now() / 8) % 360},80%,50%)`;
+        ctx.fillRect(0, 0, 640, 360);
+        if (performance.now() - t0 < 2000) requestAnimationFrame(draw); else res();
+      })();
+    });
+    const result = await session.stop();
+    const stored = await window.AVR.RecordingSession.loadBlob(await window.AVR.store.getRecording(result.id));
+    const chunks = await window.AVR.store.getChunks(result.id);
+    return {
+      firstChunkBytes: session.headBlobs[0] && session.headBlobs[0].size,
+      fileDuration: await window.AVR.webm.readDuration(result.blob),
+      storedDuration: await window.AVR.webm.readDuration(stored),
+      ms: result.durationMs,
+      sameSize: stored.size === result.blob.size,
+      chunks: chunks.length,
+    };
+  });
+  assert.ok(r.fileDuration > 0, `the finished file has no duration: ${JSON.stringify(r)}`);
+  assert.equal(r.fileDuration, r.ms);
+  assert.equal(r.storedDuration, r.ms, 'the saved copy must carry it too');
+  assert.ok(r.sameSize);
+  assert.deepEqual(errors, []);
+  await context.close();
+});
+
+test('crash recovery also finds a header split across chunks', async () => {
+  const { page, context } = await openApp(browser, server.url);
+  const r = await page.evaluate(async () => {
+    // Record a real WebM, then store it the way a crash would leave it:
+    // split with a lone first byte, marked as still recording.
+    const canvas = document.createElement('canvas');
+    canvas.width = 320;
+    canvas.height = 240;
+    const ctx = canvas.getContext('2d');
+    const rec = new MediaRecorder(canvas.captureStream(30), { mimeType: 'video/webm;codecs=vp8' });
+    const parts = [];
+    rec.ondataavailable = (e) => { if (e.data.size) parts.push(e.data); };
+    rec.start();
+    const t0 = performance.now();
+    await new Promise((res) => {
+      (function draw() {
+        ctx.fillStyle = `hsl(${(performance.now() / 8) % 360},80%,50%)`;
+        ctx.fillRect(0, 0, 320, 240);
+        if (performance.now() - t0 < 1500) requestAnimationFrame(draw); else res();
+      })();
+    });
+    rec.stop();
+    await new Promise((res) => (rec.onstop = res));
+    const file = new Blob(parts, { type: 'video/webm' });
+    const id = 'crashed-' + Date.now();
+    await window.AVR.store.putRecording({
+      id, name: 'Crashed', mode: 'camera', kind: 'video', mimeType: 'video/webm', ext: 'webm',
+      createdAt: Date.now() - 120000, updatedAt: Date.now() - 120000, durationMs: 1500, size: file.size,
+      chunkCount: 2, status: 'recording', thumb: null,
+    });
+    await window.AVR.store.putChunk(id, 0, file.slice(0, 1, 'video/webm'));
+    await window.AVR.store.putChunk(id, 1, file.slice(1, file.size, 'video/webm'));
+    const recovered = await window.AVR.RecordingSession.recoverAll();
+    const saved = await window.AVR.store.getRecording(id);
+    const blob = await window.AVR.RecordingSession.loadBlob(saved);
+    return { recovered: recovered.length, status: saved.status, duration: await window.AVR.webm.readDuration(blob), size: blob.size, original: file.size };
+  });
+  assert.equal(r.recovered, 1);
+  assert.equal(r.status, 'complete');
+  assert.equal(r.duration, 1500);
+  // Either an existing Duration was overwritten in place, or one was inserted.
+  assert.ok(r.size === r.original || r.size === r.original + 11, `size ${r.size} from ${r.original}`);
+  await context.close();
+});
+
 test('diagnostics report the version, capabilities and recent events', async () => {
   const { page, context } = await openApp(browser, server.url, {
     contextOptions: { permissions: ['clipboard-read', 'clipboard-write'] },

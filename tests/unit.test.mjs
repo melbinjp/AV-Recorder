@@ -137,6 +137,35 @@ test('webm: a SeekHead file that already has a Duration is still updated in plac
   assert.deepEqual(r, { sameLength: true, duration: 777 });
 });
 
+test('webm: patches a header split across chunks, as Chrome delivers it when the first frame is late', async () => {
+  const r = await page.evaluate(async () => {
+    // Chrome's real output in this case: the first chunk is one byte (0x1A).
+    const file = new Uint8Array([...(await window.bytesOf(window.buildWebm())), ...new Uint8Array(400 * 1024)]);
+    const cuts = [1, 20, 100 * 1024, 200 * 1024, 300 * 1024, file.length];
+    const chunks = [];
+    for (let i = 0, from = 0; i < cuts.length; from = cuts[i], i++) chunks.push(new Blob([file.slice(from, cuts[i])], { type: 'video/webm' }));
+    const fixed = await window.AVR.webm.fixDurationInChunks(chunks, 5000);
+    const whole = new Blob(fixed.blobs, { type: 'video/webm' });
+    return {
+      count: fixed.blobs.length,
+      changed: fixed.changed,
+      duration: await window.AVR.webm.readDuration(whole),
+      grew: whole.size - file.length,
+      // Chunks past the header region are the very same Blobs, untouched.
+      untouched: fixed.blobs.slice(fixed.changed.length).every((b, i) => b === chunks[fixed.changed.length + i]),
+      emptied: fixed.changed.slice(1).every((i) => fixed.blobs[i].size === 0),
+      singleByteAlone: await window.AVR.webm.fixDuration(chunks[0], 5000) === chunks[0],
+    };
+  });
+  assert.equal(r.count, 6, 'chunk count is preserved');
+  assert.deepEqual(r.changed, [0, 1, 2, 3, 4]); // chunks covering the first 256 KB
+  assert.equal(r.duration, 5000);
+  assert.equal(r.grew, 11);
+  assert.ok(r.untouched);
+  assert.ok(r.emptied);
+  assert.ok(r.singleByteAlone, 'a lone first byte cannot be patched by itself; that was the bug');
+});
+
 test('formats: bitrates follow YouTube recommendations and scale with quality', async () => {
   const r = await page.evaluate(() => {
     const b = window.AVR.formats.videoBitrate;

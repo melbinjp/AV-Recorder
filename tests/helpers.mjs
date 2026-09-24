@@ -131,6 +131,8 @@ export async function reviewInfo(page) {
       elementDuration: v.duration,
       width: v.videoWidth,
       height: v.videoHeight,
+      // Recent diagnostics events, so a failing assertion explains itself.
+      log: window.AVR.logEntries().slice(-6).map((e) => e.event + (e.detail ? ': ' + e.detail : '')),
     };
   });
 }

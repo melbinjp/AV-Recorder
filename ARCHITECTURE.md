@@ -107,6 +107,7 @@ To change the schema, bump `DB_VERSION` in `store.js` and migrate in `onupgraden
 | IndexedDB unavailable (private modes) | Records in memory. Review says "download it now". | `app.test`: refuses storage |
 | Screen share ended / device unplugged | Saves what was recorded. A lost camera bubble or microphone lets the take continue. | Manual (browser UI) |
 | Phone camera interrupted (app switch, call) | Pauses on track `mute` or page hide, and resumes when it returns. | Manual (device) |
+| First frame arrives late (camera warm-up, busy device) | Chrome splits the WebM header across chunks, starting with a single byte. The header is read and patched across chunk boundaries when saving and when recovering. | `resilience.test`: slow first frame; `unit.test`: split header |
 | Stop pressed within ~0.2 s | Nothing to save. Keeps the preview and says "too short". No empty entry is left. | `resilience.test`: split second |
 | Saved device gone, or impossible constraints | Retries with plainer constraints and forgets the stale device. | Code path in `sources.js` |
 | Unknown browser quirks | Recorder options fall back step by step: full → no bitrates → browser default. | `formats` and `session` fallbacks |

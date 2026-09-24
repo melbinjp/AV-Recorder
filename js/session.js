@@ -64,7 +64,8 @@
     this.memChunks = [];
     this.pending = {}; // seq → blob whose write to storage isn't confirmed yet
     this.memBytes = 0;
-    this.headBlob = null;
+    this.headBlobs = {}; // seq → original chunk, for the file's first HEAD_BYTES
+    this.headBytes = 0;
     this.limitHit = false;
     this.persist = false;
     this.storageFailed = false;
@@ -160,9 +161,13 @@
     var seq = this.seq++;
     this.bytes += blob.size;
     if (blob.type && (!this.mimeType || this.mimeType.indexOf('/') === -1)) this.mimeType = blob.type;
-    // Keep the original first chunk: the file header lives in it, and it is
-    // patched from memory at the end rather than read back from storage.
-    if (seq === 0) this.headBlob = blob;
+    // Keep the chunks holding the start of the file (about a second of media):
+    // the header lives there, possibly spread over several chunks, and it is
+    // patched from these originals rather than read back from storage.
+    if (this.headBytes < AVR.webm.HEAD_BYTES) {
+      this.headBlobs[seq] = blob;
+      this.headBytes += blob.size;
+    }
 
     if (!this.persist || this.storageFailed) {
       this._keepInMemory(seq, blob);
@@ -321,15 +326,13 @@
         empty.code = 'empty';
         throw empty;
       }
-      var first = chunks[0];
       var isWebm = /webm/i.test(type);
-      var source = first.seq === 0 && self.headBlob ? self.headBlob : first.blob;
-      var fixing = isWebm ? AVR.webm.fixDuration(source, durationMs) : Promise.resolve(source);
-      return fixing.then(function (fixedFirst) {
-        var patched = fixedFirst !== source;
-        if (isWebm && !patched) log('warn', 'webm-duration-not-set', AVR.formatBytes(source.size));
-        var blobs = chunks.map(function (c) { return c.blob; });
-        blobs[0] = fixedFirst;
+      var blobs = chunks.map(function (c) { return self.headBlobs[c.seq] || c.blob; });
+      var fixing = isWebm ? AVR.webm.fixDurationInChunks(blobs, durationMs) : Promise.resolve(null);
+      return fixing.then(function (fixed) {
+        if (isWebm && !fixed) log('warn', 'webm-duration-not-set', { firstChunks: blobs.slice(0, 3).map(function (b) { return b.size; }) });
+        var changed = fixed ? fixed.changed : [];
+        if (fixed) blobs = fixed.blobs;
         var blob = new Blob(blobs, { type: type });
         var result = {
           id: self.id,
@@ -344,8 +347,7 @@
         };
         if (!self.persist) return result;
 
-        var writes = [];
-        if (patched) writes.push(AVR.store.putChunk(self.id, first.seq, fixedFirst));
+        var writes = changed.map(function (i) { return AVR.store.putChunk(self.id, chunks[i].seq, blobs[i]); });
         self.memChunks.forEach(function (c) { writes.push(AVR.store.putChunk(self.id, c.seq, c.blob)); });
         Object.keys(self.pending).forEach(function (k) { writes.push(AVR.store.putChunk(self.id, Number(k), self.pending[k])); });
         // The file itself is ready in memory; storage bookkeeping gets a time
@@ -415,10 +417,13 @@
       var size = 0;
       chunks.forEach(function (c) { size += c.blob.size; });
       var duration = rec.durationMs || chunks.length * TIMESLICE;
-      var first = chunks[0];
-      var fixing = /webm/i.test(rec.mimeType || '') ? AVR.webm.fixDuration(first.blob, duration) : Promise.resolve(first.blob);
+      var blobs = chunks.map(function (c) { return c.blob; });
+      var fixing = /webm/i.test(rec.mimeType || '') ? AVR.webm.fixDurationInChunks(blobs, duration) : Promise.resolve(null);
       return fixing.then(function (fixed) {
-        return fixed !== first.blob ? AVR.store.putChunk(rec.id, first.seq, fixed) : null;
+        if (!fixed) return null;
+        return Promise.all(fixed.changed.map(function (i) {
+          return AVR.store.putChunk(rec.id, chunks[i].seq, fixed.blobs[i]);
+        }));
       }).then(function () {
         return AVR.store.updateRecording(rec.id, {
           status: 'complete',

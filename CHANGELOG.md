@@ -2,6 +2,11 @@
 
 Each release bumps the version in `js/version.js` and adds a section here. A test fails if they disagree.
 
+## 2.0.1 (2026-09-24)
+
+**Fixed**
+- Some WebM recordings were saved without a duration, so they could not be scrubbed. This happened when the first video frame arrived more than a second after recording started, as with a slow camera start or a busy phone. Chrome then splits the file header across chunks, starting with a single byte, and the header was only looked for in the first chunk. It is now found and patched wherever it falls, both when saving and when recovering after a crash.
+
 ## 2.0.0 (2026-09-24)
 
 A rebuild focused on never losing a recording, on every device.
