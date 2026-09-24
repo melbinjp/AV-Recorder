@@ -3,6 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <!-- Only this site's own files may run or load. The one inline script (the
+       footer year) is allowed by its hash: change it and the hash must change
+       too, or it is blocked (the tests catch that). -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-qQeyDtsxPtoAWnpb1CfIrr9z+OTo5DbmtUE94hu+dic='; style-src 'self'; img-src 'self' blob: https://favicon.wecanuseai.com; media-src 'self' blob:; worker-src 'self' blob:; connect-src 'self'; font-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'">
   <title>Audio Video Recorder | WeCanUseAI</title>
   <meta name="description" content="Free screen, camera and audio recorder that runs entirely in your browser. Nothing to install, nothing uploaded. Works on phones and computers, even offline.">
   <link rel="canonical" href="https://avrecorder.wecanuseai.com/">
