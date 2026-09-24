@@ -197,11 +197,19 @@
   function fixDuration(blob, durationMs) {
     if (!blob || !blob.size || !(durationMs > 0)) return Promise.resolve(blob);
     var headLen = Math.min(blob.size, HEAD_BYTES);
-    return readBytes(blob.slice(0, headLen)).then(function (buf) {
-      var patched = patchHead(new Uint8Array(buf), durationMs);
-      if (!patched) return blob;
-      return new Blob([patched, blob.slice(headLen)], { type: blob.type });
-    }).catch(function () {
+    function attempt() {
+      return readBytes(blob.slice(0, headLen)).then(function (buf) {
+        var patched = patchHead(new Uint8Array(buf), durationMs);
+        if (!patched) return blob;
+        return new Blob([patched, blob.slice(headLen)], { type: blob.type });
+      });
+    }
+    // One retry: reading a Blob can fail transiently (e.g. one backed by a
+    // file that is still being written).
+    return attempt().catch(function () {
+      return new Promise(function (r) { setTimeout(r, 100); }).then(attempt);
+    }).catch(function (err) {
+      if (AVR.log) AVR.log('warn', 'webm-header-read-failed', err);
       return blob;
     });
   }

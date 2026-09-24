@@ -30,6 +30,19 @@
     return navigator.mediaDevices.getUserMedia(constraints);
   }
 
+  // Tells the encoder what matters most. Screen text stays sharp ("detail")
+  // unless the person asked for 60 fps, which means motion matters more.
+  function applyContentHints(kind, stream) {
+    stream.getTracks().forEach(function (t) {
+      if (!('contentHint' in t)) return;
+      try {
+        if (t.kind === 'audio') t.contentHint = 'speech';
+        else if (kind === 'screen') t.contentHint = S.fps >= 60 ? 'motion' : 'detail';
+        else t.contentHint = 'motion';
+      } catch (e) { /* unsupported hint: harmless */ }
+    });
+  }
+
   function Sources(handlers) {
     this.src = { screen: null, cam: null, mic: null };
     this.handlers = handlers || {};
@@ -56,6 +69,7 @@
     this.release(kind);
     this.src[kind] = stream || null;
     if (!stream) return;
+    applyContentHints(kind, stream);
     stream.getTracks().forEach(function (track) {
       // Events from a stream that has since been replaced are ignored.
       var current = function () { return self.src[kind] === stream; };
@@ -186,6 +200,7 @@
     var t = this.track('screen', 'video');
     if (!t || !t.applyConstraints) return Promise.resolve();
     var size = AVR.formats.presetSize(S.resolution);
+    applyContentHints('screen', this.src.screen);
     return t.applyConstraints({
       width: { max: size.long }, height: { max: size.long }, frameRate: { ideal: S.fps, max: S.fps },
     }).catch(function () { /* keep the current settings */ });

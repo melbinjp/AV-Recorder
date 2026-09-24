@@ -73,6 +73,8 @@
     this.cameraCount = null;
     this.installPrompt = null;
     this.warnedNoSystemAudio = false;
+    this.take = null; // {baseName, part, startedAt}: parts of one take share a name
+    this.space = { checkedAt: 0, free: 0, minutesLeft: null, warned: false };
     this.els = this.collectElements();
 
     this.sources = new AVR.Sources({
@@ -190,7 +192,10 @@
     if (!('serviceWorker' in navigator)) return;
     var local = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
     if (location.protocol !== 'https:' && !local) return;
-    navigator.serviceWorker.register('sw.js').catch(function () { /* offline support is optional */ });
+    navigator.serviceWorker.register('sw.js').catch(function (err) {
+      // Offline support is optional; the recorder works without it.
+      AVR.log('warn', 'service-worker-failed', err);
+    });
   };
 
   // Starts the preview without a click when that won't surprise anyone: the
@@ -275,6 +280,7 @@
     };
 
     e.helpBtn.addEventListener('click', function () { self.openHelp(); });
+    this.bindDiagnostics();
     e.helpDialog.addEventListener('click', function (ev) {
       if (ev.target === e.helpDialog || (ev.target.closest && ev.target.closest('[data-close]'))) self.closeHelp();
     });
@@ -362,6 +368,40 @@
     else if (key === 'Escape' && this.state === 'countdown') { this.cancelCountdown(); }
     else return;
     ev.preventDefault();
+  };
+
+  App.prototype.bindDiagnostics = function () {
+    var details = document.getElementById('diagnostics');
+    var pre = document.getElementById('diagText');
+    var copyBtn = document.getElementById('copyDiagBtn');
+    document.getElementById('appVersion').textContent = AVR.VERSION;
+    function refresh() {
+      return AVR.diagnosticsReport().then(function (text) {
+        pre.textContent = text;
+        return text;
+      });
+    }
+    details.addEventListener('toggle', function () { if (details.open) refresh(); });
+    copyBtn.addEventListener('click', function () {
+      refresh().then(function (text) {
+        var copied = navigator.clipboard && navigator.clipboard.writeText
+          ? navigator.clipboard.writeText(text)
+          : Promise.reject(new Error('no clipboard'));
+        return copied.catch(function () {
+          // Older browsers: select the text and use the legacy copy command.
+          var range = document.createRange();
+          range.selectNodeContents(pre);
+          var sel = window.getSelection();
+          sel.removeAllRanges();
+          sel.addRange(range);
+          if (!document.execCommand('copy')) throw new Error('copy refused');
+        });
+      }).then(function () {
+        AVR.toast('Diagnostics copied.', 'success', { timeout: 2000 });
+      }, function () {
+        AVR.toast('Could not copy. Select the text and copy it by hand.', 'warning');
+      });
+    });
   };
 
   App.prototype.openHelp = function () {
@@ -581,6 +621,7 @@
       if (stale()) return false;
       var what = err && err.what;
       var cancelled = what === 'screen' && err && (err.name === 'NotAllowedError' || err.name === 'AbortError') && !/system/i.test(err.message || '');
+      AVR.log(cancelled ? 'info' : 'warn', cancelled ? 'share-cancelled' : 'preview-failed', (what || 'source') + ' ' + ((err && err.name) || '') + ' ' + ((err && err.message) || ''));
       self.releaseAll();
       self.setState('idle');
       var msg = what ? AVR.describeMediaError(err, what) : (err && err.message) || 'Could not start the preview.';
@@ -656,6 +697,7 @@
   App.prototype.onSourceEnded = function (kind) {
     var live = this.state === 'recording' || this.state === 'paused';
     var mode = S.mode;
+    AVR.log(live ? 'warn' : 'info', 'source-ended', kind + ' during ' + this.state);
     if (live) {
       if (kind === 'screen') {
         AVR.toast('Screen sharing ended, so the recording was stopped and saved.', 'info');
@@ -1008,10 +1050,13 @@
     return new MediaStream(tracks);
   };
 
-  App.prototype.startRecording = function () {
+  // opts.nextPart: continue the current take as its next part (after a
+  // recorder failure), without a countdown and without resetting the prompter.
+  App.prototype.startRecording = function (opts) {
     var self = this;
     var mode = S.mode;
     var kind = mode === 'audio' ? 'audio' : 'video';
+    var nextPart = !!(opts && opts.nextPart && this.take);
     var stream;
     try {
       stream = this.buildOutputStream();
@@ -1027,45 +1072,106 @@
     }
     var size = this.outputSize() || { width: 0, height: 0 };
     var format = AVR.formats.pick(kind, kind === 'audio' ? S.audioFormat : S.videoFormat);
+    var videoBits = kind === 'video' ? AVR.formats.videoBitrate(size.width, size.height, S.fps, S.quality) : 0;
+    var audioBits = stream.getAudioTracks().length ? AVR.formats.audioBitrate(S.quality) : 0;
+
+    if (nextPart) {
+      this.take.part += 1;
+    } else {
+      this.take = { baseName: MODES[mode].label + ' ' + AVR.stamp(), part: 1 };
+    }
+    this.take.startedAt = Date.now();
+    var name = this.take.baseName + (this.take.part > 1 ? ' (part ' + this.take.part + ')' : '');
+
     var session = new AVR.RecordingSession({
       stream: stream,
       kind: kind,
       mode: mode,
       format: format,
-      videoBitsPerSecond: kind === 'video' ? AVR.formats.videoBitrate(size.width, size.height, S.fps, S.quality) : 0,
-      audioBitsPerSecond: stream.getAudioTracks().length ? AVR.formats.audioBitrate(S.quality) : 0,
+      videoBitsPerSecond: videoBits,
+      audioBitsPerSecond: audioBits,
       width: size.width,
       height: size.height,
-      name: MODES[mode].label + ' ' + AVR.stamp(),
+      name: name,
     });
     session.onerror = function (err) {
       if (self.session !== session) return;
-      AVR.toast('The recorder hit a problem (' + ((err && (err.name || err.message)) || 'unknown') + '). What was recorded so far has been saved.', 'error', { timeout: 10000 });
-      self.stopRecording();
+      self.onRecorderError(session, err);
     };
     session.onwarning = function (msg) { AVR.toast(msg, 'warning', { timeout: 12000 }); };
+    session.onlimit = function () {
+      if (self.session !== session) return;
+      AVR.toast('Out of space, so the recording was stopped and saved before anything could be lost. Download it now, then free up space.', 'error', { timeout: 20000 });
+      self.stopRecording();
+    };
     this.session = session;
     this.autoPaused = false;
+    this.space.checkedAt = 0;
+    this.space.minutesLeft = null;
     this.setState('recording');
+    if (!nextPart) this.checkSpace((videoBits + audioBits) / 8, true);
 
     session.start().then(function () {
       if (self.session !== session) return;
-      AVR.store.persist();
       self.acquireWakeLock();
       self.startTicker();
       if (S.prompter.visible && S.prompter.autoStart) {
-        self.prompter.reset();
+        if (!nextPart) self.prompter.reset();
         self.prompter.play();
       }
       setTimeout(function () { self.captureThumbnail(session); }, 1200);
+      if (!nextPart) AVR.announce('Recording started');
       self.render();
     }).catch(function (err) {
       if (self.session !== session) return;
+      AVR.log('error', 'record-start-failed', err);
       self.session = null;
       self.disposeMixer();
       self.setState('preview');
       AVR.toast('Could not start recording: ' + ((err && err.message) || 'this browser refused'), 'error', { timeout: 10000 });
     });
+  };
+
+  // The browser's encoder failed mid-recording (rare: a driver fault, or the
+  // shared window changing in a way the encoder can't follow). Save what we
+  // have and, if the sources are still live, carry on as the next part of
+  // the same take. Capped, so a fault that repeats can't loop.
+  App.prototype.onRecorderError = function (session, err) {
+    AVR.log('error', 'recorder-error', err);
+    var take = this.take;
+    var canContinue = this.hasLiveSources() && take && take.part < 5 && Date.now() - take.startedAt > 3000;
+    if (!canContinue) {
+      AVR.toast('The recorder hit a problem (' + ((err && (err.name || err.message)) || 'unknown') + '). What was recorded so far has been saved.', 'error', { timeout: 10000 });
+      this.stopRecording();
+      return;
+    }
+    this.stopRecording({ continueTake: true });
+  };
+
+  // Estimates how many minutes of recording the device has room for, from
+  // the browser's storage quota and the recording's measured (or nominal) rate.
+  App.prototype.checkSpace = function (nominalBytesPerSec, beforeStart) {
+    var self = this;
+    this.space.checkedAt = Date.now();
+    return AVR.store.status().then(function (st) {
+      if (!st.available || !st.quota) return;
+      var rate = (self.session && self.session.byteRate()) || nominalBytesPerSec;
+      if (!rate) return;
+      var free = Math.max(0, st.quota - st.usage);
+      var minutes = free / rate / 60;
+      self.space.free = free;
+      self.space.minutesLeft = minutes;
+      if (beforeStart && minutes < 10) {
+        AVR.toast('This device has room for only about ' + Math.max(1, Math.floor(minutes)) +
+          ' more minute' + (minutes >= 2 ? 's' : '') + ' of recording at this quality. Free up space or lower the quality.', 'warning', { timeout: 12000 });
+        self.space.warned = true;
+      } else if (!beforeStart && minutes < 3 && !self.space.warned) {
+        self.space.warned = true;
+        AVR.toast('Storage is almost full: about ' + Math.max(1, Math.round(minutes)) +
+          ' minute' + (minutes >= 1.5 ? 's' : '') + ' left. If it runs out, the recording is saved automatically.', 'warning', { timeout: 12000 });
+      }
+      AVR.log(minutes < 10 ? 'warn' : 'info', 'space', Math.round(minutes) + ' min left, ' + AVR.formatBytes(free) + ' free');
+    }).catch(function () { /* an estimate is a nicety */ });
   };
 
   App.prototype.captureThumbnail = function (session) {
@@ -1094,6 +1200,8 @@
     this.autoPaused = !!auto;
     this.prompter.pause();
     this.setState('paused');
+    AVR.announce('Recording paused');
+    if (auto) AVR.log('info', 'auto-paused');
     return true;
   };
 
@@ -1103,6 +1211,7 @@
     this.autoPaused = false;
     if (S.prompter.visible && S.prompter.autoStart) this.prompter.play();
     this.setState('recording');
+    AVR.announce('Recording resumed');
     return true;
   };
 
@@ -1131,11 +1240,14 @@
     this.render();
   };
 
-  App.prototype.stopRecording = function () {
+  // opts.continueTake: save this part and immediately record the next one,
+  // keeping the sources, preview and floating controls as they are.
+  App.prototype.stopRecording = function (opts) {
     var self = this;
     var session = this.session;
+    var continuing = !!(opts && opts.continueTake);
     if (!session || this.state === 'saving') return;
-    this.prompter.pause();
+    if (!continuing) this.prompter.pause();
     this.stopTicker();
     this.setState('saving');
     function cleanUp() {
@@ -1146,15 +1258,36 @@
       self.floating.close();
     }
     session.stop().then(function (result) {
+      if (continuing) {
+        self.session = null;
+        self.disposeMixer();
+        var take = self.take;
+        if (take.part === 1 && result.saved) {
+          AVR.store.updateRecording(result.id, { name: take.baseName + ' (part 1)' }).catch(function () {});
+        }
+        self.library.refresh();
+        AVR.toast('The recorder hit a problem, so part ' + take.part + ' was saved and recording carries on as part ' +
+          (take.part + 1) + '. Both are in Your recordings.', 'warning', { timeout: 12000 });
+        self.startRecording({ nextPart: true });
+        return;
+      }
       cleanUp();
       self.showReview(result, result.blob);
       self.library.refresh();
+      AVR.announce('Recording saved, ' + AVR.formatDuration(result.durationMs));
       if (result.saved) {
         AVR.toast('Saved (' + AVR.formatDuration(result.durationMs) + '). It is also in Your recordings below.', 'success');
+        // Now that there is something worth keeping, ask the browser not to
+        // clear it under storage pressure.
+        AVR.store.persist().then(function (granted) {
+          AVR.log('info', 'storage-persist', granted ? 'granted' : 'not granted');
+          self.library.updateStorage();
+        });
       } else {
         AVR.toast('Recording ready, but it could not be saved in this browser. Download it now so you don\'t lose it.', 'warning', { timeout: 15000 });
       }
     }).catch(function (err) {
+      AVR.log('error', 'record-failed', err);
       cleanUp();
       self.setState('idle');
       self.library.refresh();
@@ -1188,7 +1321,13 @@
     var paused = this.state === 'paused';
     this.els.recBadgeTime.textContent = t;
     this.els.floatTime.textContent = t;
-    this.els.recSize.textContent = AVR.formatBytes(s.bytes);
+    if (Date.now() - this.space.checkedAt > 15000) this.checkSpace(0, false);
+    // Time left appears only when it is worth knowing (under an hour).
+    var left = this.space.minutesLeft;
+    var size = AVR.formatBytes(s.bytes);
+    if (left !== null && left < 60) size += ' · ' + (left < 1 ? '<1' : Math.floor(left)) + ' min left';
+    this.els.recSize.textContent = size;
+    this.els.recSize.classList.toggle('low', left !== null && left < 5);
     document.title = (paused ? '❚❚ ' : '● ') + t + ' · ' + (paused ? 'Paused' : 'Recording') + ' | ' + BASE_TITLE;
   };
 
@@ -1319,7 +1458,8 @@
     if (st !== 'countdown') e.countdownOverlay.hidden = true;
     e.recBadge.hidden = !live;
     e.recBadge.classList.toggle('paused', st === 'paused');
-    e.recBadgeLabel.textContent = st === 'paused' ? (this.autoPaused ? 'PAUSED (interrupted)' : 'PAUSED') : 'REC';
+    var part = this.take && this.take.part > 1 && live ? ' · part ' + this.take.part : '';
+    e.recBadgeLabel.textContent = (st === 'paused' ? (this.autoPaused ? 'PAUSED (interrupted)' : 'PAUSED') : 'REC') + part;
     e.stageHint.hidden = !(st === 'preview' && bubble && !this.cameraHidden);
 
     // Control bar

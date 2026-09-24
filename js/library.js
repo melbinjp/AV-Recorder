@@ -44,19 +44,28 @@
 
   Library.prototype.updateStorage = function () {
     var el = this.storageEl;
-    return AVR.store.estimate().then(function (est) {
-      if (!est || !est.quota) {
+    var note = this.root.querySelector('#libraryPersist');
+    return AVR.store.status().then(function (st) {
+      if (note) {
+        // Only worth saying once there is something to lose.
+        note.hidden = !st.available || st.persisted || !this.recs.length;
+      }
+      if (!st.quota) {
         el.hidden = true;
         return;
       }
-      var pct = Math.min(100, (est.usage / est.quota) * 100);
+      var pct = Math.min(100, (st.usage / st.quota) * 100);
       el.hidden = false;
       el.innerHTML = '<span class="storage-text"></span><span class="storage-bar"><span class="storage-fill"></span></span>';
-      el.querySelector('.storage-text').textContent = AVR.formatBytes(est.usage) + ' used · ' + AVR.formatBytes(Math.max(0, est.quota - est.usage)) + ' free';
+      el.querySelector('.storage-text').textContent = AVR.formatBytes(st.usage) + ' used · ' +
+        AVR.formatBytes(Math.max(0, st.quota - st.usage)) + ' free' + (st.persisted ? ' · protected' : '');
+      el.title = st.persisted
+        ? 'The browser has agreed not to clear these recordings when space runs low.'
+        : 'The browser may clear these recordings if the device runs very low on space.';
       var fill = el.querySelector('.storage-fill');
       fill.style.width = Math.max(1, pct).toFixed(1) + '%';
       fill.classList.toggle('warn', pct > 80);
-    });
+    }.bind(this));
   };
 
   Library.prototype.render = function () {

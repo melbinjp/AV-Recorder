@@ -27,7 +27,7 @@ const ICONS = [
   'device-mobile', 'timer', 'screencast', 'user-focus', 'play', 'pause', 'minus',
   'plus', 'flip-horizontal', 'eye', 'eye-slash', 'speaker-high', 'caret-down',
   'wifi-slash', 'lock-simple', 'arrows-clockwise', 'stop', 'record', 'clock',
-  'folder-simple', 'magnifying-glass-plus',
+  'folder-simple', 'magnifying-glass-plus', 'copy',
   // fill weight
   'record-fill', 'pause-fill', 'play-fill', 'stop-fill', 'check-circle-fill',
   'warning-circle-fill', 'warning-fill', 'info-fill', 'microphone-slash-fill',
@@ -68,8 +68,10 @@ const symbols = ICONS.map((name) => {
   return `<symbol id="i-${name}" viewBox="0 0 1024 1024">${body}</symbol>`;
 });
 
+// No inline style attribute: the Content-Security-Policy forbids them. The
+// host element is hidden from layout by the #icon-sprite rule in style.css.
 const sprite =
-  '<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style="position:absolute;width:0;height:0;overflow:hidden">' +
+  '<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">' +
   symbols.join('') +
   '</svg>';
 
