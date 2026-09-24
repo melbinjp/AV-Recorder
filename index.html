@@ -1,168 +1,480 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Audio Video Recorder | WeCanUseAI</title>
-  <meta name="description" content="Record audio and video from your browser.">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Audio Video Recorder | WeCanUseAI</title>
+  <meta name="description" content="Free screen, camera and audio recorder that runs entirely in your browser. Nothing to install, nothing uploaded. Works on phones and computers, even offline.">
   <link rel="canonical" href="https://avrecorder.wecanuseai.com/">
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="WeCanUseAI">
   <meta property="og:title" content="Audio Video Recorder">
-  <meta property="og:description" content="Record audio and video from your browser.">
+  <meta property="og:description" content="Record your camera, screen and voice in the browser. Free, private, nothing to install.">
   <meta property="og:url" content="https://avrecorder.wecanuseai.com/">
   <meta name="twitter:card" content="summary">
   <meta name="twitter:title" content="Audio Video Recorder">
-  <meta name="twitter:description" content="Record audio and video from your browser.">
+  <meta name="twitter:description" content="Record your camera, screen and voice in the browser. Free, private, nothing to install.">
+  <meta name="theme-color" content="#0b1120">
+  <meta name="color-scheme" content="dark">
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="AV Recorder">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <link rel="icon" type="image/x-icon" href="https://favicon.wecanuseai.com/favicon.ico">
   <link rel="icon" type="image/png" sizes="32x32" href="https://favicon.wecanuseai.com/favicon-32x32.png">
   <link rel="icon" type="image/png" sizes="16x16" href="https://favicon.wecanuseai.com/favicon-16x16.png">
-  <link rel="apple-touch-icon" sizes="180x180" href="https://favicon.wecanuseai.com/apple-touch-icon-180x180.png">
-    <!-- Google Fonts -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css">
-    <!-- Favicon -->
-    <!-- Phosphor Icons for UI (Local) -->
-    <link rel="stylesheet" href="assets/phosphor-icons/regular/style.css">
-    <link rel="stylesheet" href="assets/phosphor-icons/fill/style.css">
+  <link rel="icon" type="image/svg+xml" href="icons/icon.svg">
+  <link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <div class="app-background"></div>
-    
-    <div class="container">
-        <header class="app-header">
-            <div class="logo-area">
-                <i class="ph-fill ph-record"></i>
-                <h1>Media Capture Studio</h1>
+  <script src="js/icons.js"></script>
+  <a class="skip-link" href="#stage">Skip to the recorder</a>
+  <div class="app-background" aria-hidden="true"></div>
+
+  <div class="container">
+    <header class="app-header">
+      <div class="brand">
+        <svg class="icon brand-icon" aria-hidden="true"><use href="#i-record-fill"></use></svg>
+        <div>
+          <h1>AV Recorder</h1>
+          <p class="subtitle">Record your camera, screen and voice. Free, private, nothing to install.</p>
+        </div>
+      </div>
+      <div class="header-actions">
+        <span class="pill pill-offline" id="offlinePill" hidden>
+          <svg class="icon" aria-hidden="true"><use href="#i-wifi-slash"></use></svg> Offline, still works
+        </span>
+        <button type="button" class="btn btn-ghost" id="installBtn" hidden>
+          <svg class="icon" aria-hidden="true"><use href="#i-download-simple"></use></svg> Install app
+        </button>
+        <button type="button" class="btn btn-ghost btn-icon-only" id="helpBtn" aria-label="Help and keyboard shortcuts" title="Help (?)">
+          <svg class="icon" aria-hidden="true"><use href="#i-question"></use></svg>
+        </button>
+      </div>
+    </header>
+
+    <div class="banner" id="envBanner" role="alert" hidden></div>
+
+    <main class="studio">
+      <section class="panel stage-panel" aria-label="Recorder">
+        <div class="mode-tabs" role="tablist" aria-label="What to record">
+          <button type="button" role="tab" class="mode-tab" data-mode="camera" aria-selected="true">
+            <svg class="icon" aria-hidden="true"><use href="#i-video-camera"></use></svg><span>Camera</span>
+          </button>
+          <button type="button" role="tab" class="mode-tab" data-mode="screen" aria-selected="false">
+            <svg class="icon" aria-hidden="true"><use href="#i-monitor"></use></svg><span>Screen</span>
+          </button>
+          <button type="button" role="tab" class="mode-tab" data-mode="screencam" aria-selected="false">
+            <svg class="icon" aria-hidden="true"><use href="#i-user-focus"></use></svg><span>Screen + Cam</span>
+          </button>
+          <button type="button" role="tab" class="mode-tab" data-mode="audio" aria-selected="false">
+            <svg class="icon" aria-hidden="true"><use href="#i-microphone"></use></svg><span>Audio</span>
+          </button>
+        </div>
+
+        <div class="stage" id="stage" tabindex="-1">
+          <video id="previewVideo" class="stage-media" muted playsinline autoplay hidden></video>
+          <div id="canvasHost" class="stage-media stage-canvas-host" hidden></div>
+          <canvas id="audioViz" class="stage-media stage-viz" hidden></canvas>
+          <video id="playbackVideo" class="stage-media stage-playback" controls playsinline preload="metadata" hidden></video>
+
+          <div class="stage-placeholder" id="stagePlaceholder">
+            <svg class="icon placeholder-icon" aria-hidden="true"><use id="placeholderIcon" href="#i-video-camera"></use></svg>
+            <p class="placeholder-text" id="placeholderText">Preview your camera, check your framing, then hit record.</p>
+            <button type="button" class="btn btn-primary btn-lg" id="previewBtn">Start camera</button>
+            <p class="placeholder-note" id="placeholderNote" hidden></p>
+          </div>
+
+          <div class="stage-busy" id="stageBusy" hidden>
+            <span class="spinner" aria-hidden="true"></span><span id="busyText">Starting…</span>
+          </div>
+          <div class="countdown" id="countdownOverlay" hidden aria-live="assertive"></div>
+          <div class="stage-flash" id="stageFlash" aria-hidden="true"></div>
+
+          <div class="rec-badge" id="recBadge" hidden>
+            <span class="rec-dot" aria-hidden="true"></span>
+            <span id="recBadgeLabel">REC</span>
+            <span class="rec-badge-time" id="recBadgeTime">00:00</span>
+          </div>
+          <div class="stage-chip" id="stageChip" hidden></div>
+          <div class="stage-hint" id="stageHint" hidden>Drag the camera bubble to move it</div>
+
+          <div class="prompter" id="prompter" hidden>
+            <div class="prompter-viewport">
+              <div class="prompter-text" id="prompterText"></div>
             </div>
-            <p class="subtitle">High-fidelity audio, video, and screen recording directly in your browser.</p>
-        </header>
+            <div class="prompter-line" aria-hidden="true"></div>
+            <div class="prompter-toolbar" role="toolbar" aria-label="Teleprompter">
+              <button type="button" data-prompter="toggle" aria-label="Start scrolling"></button>
+              <button type="button" data-prompter="reset" aria-label="Back to the start" title="Back to the start">
+                <svg class="icon" aria-hidden="true"><use href="#i-arrow-counter-clockwise"></use></svg>
+              </button>
+              <span class="prompter-group" title="Scroll speed">
+                <button type="button" data-prompter="slower" aria-label="Slower"><svg class="icon" aria-hidden="true"><use href="#i-minus"></use></svg></button>
+                <span class="prompter-speed"><svg class="icon" aria-hidden="true"><use href="#i-timer"></use></svg><span data-prompter-value="speed">3</span></span>
+                <button type="button" data-prompter="faster" aria-label="Faster"><svg class="icon" aria-hidden="true"><use href="#i-plus"></use></svg></button>
+              </span>
+              <span class="prompter-group" title="Text size">
+                <button type="button" data-prompter="smaller" aria-label="Smaller text"><svg class="icon" aria-hidden="true"><use href="#i-minus"></use></svg></button>
+                <svg class="icon" aria-hidden="true"><use href="#i-text-aa"></use></svg>
+                <button type="button" data-prompter="bigger" aria-label="Bigger text"><svg class="icon" aria-hidden="true"><use href="#i-plus"></use></svg></button>
+              </span>
+              <button type="button" data-prompter="mirror" aria-label="Mirror text (for prompter glass)" title="Mirror text">
+                <svg class="icon" aria-hidden="true"><use href="#i-flip-horizontal"></use></svg>
+              </button>
+              <button type="button" data-prompter="edit" aria-label="Edit script" title="Edit script">
+                <svg class="icon" aria-hidden="true"><use href="#i-pencil-simple"></use></svg>
+              </button>
+              <button type="button" data-prompter="close" aria-label="Hide teleprompter" title="Hide">
+                <svg class="icon" aria-hidden="true"><use href="#i-x"></use></svg>
+              </button>
+            </div>
+          </div>
+        </div>
 
-        <main class="main-content">
-            <!-- Controls Section -->
-            <section class="panel controls-panel">
-                <div class="panel-header">
-                    <h2><i class="ph ph-sliders"></i> Settings & Sources</h2>
-                </div>
-                
-                <div class="device-selectors">
-                    <div class="input-group">
-                        <label for="videoSource"><i class="ph ph-camera"></i> Camera</label>
-                        <select id="videoSource" class="device-select">
-                            <option value="">Loading devices...</option>
-                        </select>
-                        <div class="checkbox-group" style="margin-top: 0.5rem; display: flex; align-items: center; gap: 0.5rem;">
-                            <input type="checkbox" id="mirrorCamera" checked>
-                            <label for="mirrorCamera" style="font-size: 0.85rem; cursor: pointer;">Mirror Camera</label>
-                        </div>
-                    </div>
-                    <div class="input-group">
-                        <label for="audioSource"><i class="ph ph-microphone"></i> Microphone</label>
-                        <select id="audioSource" class="device-select">
-                            <option value="">Loading devices...</option>
-                        </select>
-                    </div>
-                </div>
+        <div class="meter-row" id="meterRow">
+          <svg class="icon meter-icon" aria-hidden="true"><use id="meterIcon" href="#i-microphone"></use></svg>
+          <div class="meter" id="meter" role="meter" aria-label="Microphone level" aria-valuemin="-60" aria-valuemax="0" aria-valuenow="-60">
+            <div class="meter-fill" id="meterFill"></div>
+            <div class="meter-peak" id="meterPeak"></div>
+          </div>
+          <span class="meter-db" id="meterDb">–∞ dB</span>
+          <span class="rec-size" id="recSize"></span>
+        </div>
 
-                <div class="recording-actions">
-                    <div class="action-card" id="card-audio">
-                        <div class="card-icon"><i class="ph ph-microphone-stage"></i></div>
-                        <h3>Audio Only</h3>
-                        <p>Record your microphone</p>
-                        <div class="card-buttons">
-                            <button class="btn btn-primary start-btn" data-type="audio">
-                                <i class="ph-fill ph-record"></i> Start
-                            </button>
-                        </div>
-                    </div>
-                    
-                    <div class="action-card" id="card-camera">
-                        <div class="card-icon"><i class="ph ph-video-camera"></i></div>
-                        <h3>Camera</h3>
-                        <p>Record video with audio</p>
-                        <div class="card-buttons">
-                            <button class="btn btn-primary start-btn" data-type="camera">
-                                <i class="ph-fill ph-record"></i> Start
-                            </button>
-                        </div>
-                    </div>
+        <div class="control-bar" id="controlBar">
+          <div class="control-primary">
+            <button type="button" class="ctl" id="muteBtn" aria-pressed="false" title="Mute microphone (M)">
+              <svg class="icon" aria-hidden="true"><use href="#i-microphone"></use></svg><span class="ctl-label">Mute</span>
+            </button>
+            <button type="button" class="record-btn" id="recordBtn" aria-label="Start recording (R)">
+              <span class="record-btn-inner" aria-hidden="true"></span>
+            </button>
+            <button type="button" class="ctl" id="pauseBtn" title="Pause (P)" disabled>
+              <svg class="icon" aria-hidden="true"><use href="#i-pause-fill"></use></svg><span class="ctl-label">Pause</span>
+            </button>
+          </div>
+          <div class="control-secondary">
+            <button type="button" class="ctl" id="flipBtn" title="Switch between front and back camera" hidden>
+              <svg class="icon" aria-hidden="true"><use href="#i-camera-rotate"></use></svg><span class="ctl-label">Flip</span>
+            </button>
+            <button type="button" class="ctl" id="camToggleBtn" aria-pressed="false" title="Hide the camera bubble (C)" hidden>
+              <svg class="icon" aria-hidden="true"><use href="#i-camera-slash"></use></svg><span class="ctl-label">Hide cam</span>
+            </button>
+            <button type="button" class="ctl" id="snapshotBtn" title="Save a still image, e.g. for a thumbnail (S)" disabled>
+              <svg class="icon" aria-hidden="true"><use href="#i-image"></use></svg><span class="ctl-label">Photo</span>
+            </button>
+            <button type="button" class="ctl" id="prompterBtn" aria-pressed="false" title="Teleprompter (T)">
+              <svg class="icon" aria-hidden="true"><use href="#i-scroll"></use></svg><span class="ctl-label">Prompter</span>
+            </button>
+            <button type="button" class="ctl" id="popoutBtn" title="Floating controls that stay on top of other windows" hidden>
+              <svg class="icon" aria-hidden="true"><use href="#i-picture-in-picture"></use></svg><span class="ctl-label">Pop out</span>
+            </button>
+          </div>
+        </div>
 
-                    <div class="action-card" id="card-screen">
-                        <div class="card-icon"><i class="ph ph-monitor-play"></i></div>
-                        <h3>Screen</h3>
-                        <p>Capture screen & system audio</p>
-                        <div class="card-buttons">
-                            <button class="btn btn-primary start-btn" data-type="screen">
-                                <i class="ph-fill ph-record"></i> Start
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            </section>
+        <div class="review-bar" id="reviewBar" hidden>
+          <p class="review-info" id="reviewInfo"></p>
+          <div class="review-actions">
+            <button type="button" class="btn btn-success" id="downloadBtn">
+              <svg class="icon" aria-hidden="true"><use href="#i-download-simple"></use></svg> Download
+            </button>
+            <button type="button" class="btn btn-secondary" id="shareBtn" hidden>
+              <svg class="icon" aria-hidden="true"><use href="#i-share-network"></use></svg> Share
+            </button>
+            <button type="button" class="btn btn-secondary" id="frameBtn" title="Save the current frame as an image, e.g. for a thumbnail">
+              <svg class="icon" aria-hidden="true"><use href="#i-image"></use></svg> Save frame
+            </button>
+            <button type="button" class="btn btn-secondary" id="wavBtn" title="Save the sound as an uncompressed WAV file for editing">
+              <svg class="icon" aria-hidden="true"><use href="#i-file-audio"></use></svg> WAV
+            </button>
+            <button type="button" class="btn btn-ghost btn-danger-ghost" id="deleteBtn">
+              <svg class="icon" aria-hidden="true"><use href="#i-trash"></use></svg> Delete
+            </button>
+            <button type="button" class="btn btn-primary" id="newBtn">
+              <svg class="icon" aria-hidden="true"><use href="#i-record-fill"></use></svg> New recording
+            </button>
+          </div>
+        </div>
+      </section>
 
-            <!-- Preview Section -->
-            <section class="panel preview-panel">
-                <div class="panel-header">
-                    <h2><i class="ph ph-eye"></i> Live Preview</h2>
-                    <div class="status-indicator" id="recordingStatus">
-                        <span class="status-dot"></span>
-                        <span class="status-text">Ready</span>
-                        <span class="recording-time" id="recordingTime">00:00</span>
-                    </div>
-                </div>
+      <aside class="panel settings-panel" aria-label="Settings">
+        <details class="setting-group" open>
+          <summary><svg class="icon" aria-hidden="true"><use href="#i-sliders"></use></svg> Sources</summary>
+          <div class="setting-body">
+            <div class="field" data-modes="camera screencam">
+              <label for="videoSource">Camera</label>
+              <select id="videoSource"><option value="">Default camera</option></select>
+            </div>
+            <div class="field">
+              <label for="audioSource">Microphone</label>
+              <select id="audioSource"><option value="">Default microphone</option></select>
+            </div>
+            <label class="check" data-modes="camera screencam">
+              <input type="checkbox" id="mirrorCamera"> Mirror my camera (selfie view)
+            </label>
+            <label class="check" data-modes="screen screencam">
+              <input type="checkbox" id="systemAudio"> Record tab or system sound
+            </label>
+            <p class="hint" data-modes="screen screencam" id="systemAudioHint"></p>
+            <p class="hint" id="permissionHint" hidden>Device names appear after you allow camera or microphone access.</p>
+          </div>
+        </details>
 
-                <div class="preview-container">
-                    <video id="liveVideo" autoplay muted playsinline></video>
-                    <div class="audio-visualizer-container">
-                        <canvas id="audioVisualizer"></canvas>
-                    </div>
-                    <div class="preview-placeholder" id="previewPlaceholder">
-                        <i class="ph ph-monitor"></i>
-                        <p>Select a source to begin preview</p>
-                    </div>
-                </div>
+        <details class="setting-group" data-modes="camera screen screencam">
+          <summary><svg class="icon" aria-hidden="true"><use href="#i-film-strip"></use></svg> Video quality</summary>
+          <div class="setting-body">
+            <div class="field-row">
+              <div class="field">
+                <label for="resolution">Resolution</label>
+                <select id="resolution">
+                  <option value="720">720p HD</option>
+                  <option value="1080">1080p Full HD</option>
+                  <option value="1440">1440p 2K</option>
+                  <option value="2160">2160p 4K</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="fps">Frame rate</label>
+                <select id="fps">
+                  <option value="24">24 fps (film)</option>
+                  <option value="30">30 fps</option>
+                  <option value="60">60 fps (smooth)</option>
+                </select>
+              </div>
+            </div>
+            <div class="field-row">
+              <div class="field">
+                <label for="quality">Quality</label>
+                <select id="quality">
+                  <option value="standard">Standard (smaller files)</option>
+                  <option value="high">High (YouTube recommended)</option>
+                  <option value="max">Maximum</option>
+                </select>
+              </div>
+              <div class="field" data-modes="camera">
+                <label for="aspect">Shape</label>
+                <select id="aspect">
+                  <option value="auto">As the camera sees it</option>
+                  <option value="16:9">16:9 Landscape</option>
+                  <option value="9:16">9:16 Vertical (Shorts, Reels)</option>
+                  <option value="1:1">1:1 Square</option>
+                </select>
+              </div>
+            </div>
+            <div class="field">
+              <label for="videoFormat">File format</label>
+              <select id="videoFormat"></select>
+            </div>
+            <p class="hint" id="qualityHint"></p>
+          </div>
+        </details>
 
-                <!-- Active Recording Controls (Hidden by default) -->
-                <div class="active-controls" id="activeControls" style="display: none;">
-                    <button class="btn btn-warning" id="pauseBtn">
-                        <i class="ph-fill ph-pause"></i> Pause
-                    </button>
-                    <button class="btn btn-danger" id="stopBtn">
-                        <i class="ph-fill ph-stop"></i> Stop Recording
-                    </button>
-                </div>
-                
-                <!-- Playback / Download Controls (Hidden by default) -->
-                <div class="playback-controls" id="playbackControls" style="display: none;">
-                     <button class="btn btn-secondary" id="discardBtn">
-                        <i class="ph ph-trash"></i> Discard
-                    </button>
-                    <button class="btn btn-success" id="downloadBtn">
-                        <i class="ph ph-download-simple"></i> Download
-                    </button>
-                </div>
-            </section>
-        </main>
-        
-        <div id="toastContainer" class="toast-container"></div>
+        <details class="setting-group">
+          <summary><svg class="icon" aria-hidden="true"><use href="#i-waveform"></use></svg> Audio</summary>
+          <div class="setting-body">
+            <div class="field">
+              <label for="micGain">Microphone volume <output id="micGainValue" for="micGain">100%</output></label>
+              <input type="range" id="micGain" min="0" max="300" step="5" value="100">
+            </div>
+            <label class="check"><input type="checkbox" id="noiseSuppression"> Reduce background noise</label>
+            <label class="check"><input type="checkbox" id="echoCancellation"> Echo cancellation <span class="hint-inline">(turn off with headphones)</span></label>
+            <label class="check"><input type="checkbox" id="autoGainControl"> Automatic volume</label>
+            <div class="field" data-modes="audio">
+              <label for="audioFormat">File format</label>
+              <select id="audioFormat"></select>
+            </div>
+          </div>
+        </details>
+
+        <details class="setting-group" data-modes="screencam">
+          <summary><svg class="icon" aria-hidden="true"><use href="#i-user-focus"></use></svg> Camera bubble</summary>
+          <div class="setting-body">
+            <div class="field">
+              <span class="field-label" id="bubbleSizeLabel">Size</span>
+              <div class="segmented" role="radiogroup" aria-labelledby="bubbleSizeLabel" data-setting="bubble.size">
+                <button type="button" role="radio" data-value="s">Small</button>
+                <button type="button" role="radio" data-value="m">Medium</button>
+                <button type="button" role="radio" data-value="l">Large</button>
+              </div>
+            </div>
+            <div class="field">
+              <span class="field-label" id="bubbleShapeLabel">Shape</span>
+              <div class="segmented" role="radiogroup" aria-labelledby="bubbleShapeLabel" data-setting="bubble.shape">
+                <button type="button" role="radio" data-value="circle">Circle</button>
+                <button type="button" role="radio" data-value="rounded">Rounded</button>
+                <button type="button" role="radio" data-value="rect">Wide</button>
+              </div>
+            </div>
+            <div class="field">
+              <span class="field-label" id="bubblePosLabel">Position</span>
+              <div class="corner-picker" role="group" aria-labelledby="bubblePosLabel">
+                <button type="button" data-corner="0,0" aria-label="Top left"></button>
+                <button type="button" data-corner="1,0" aria-label="Top right"></button>
+                <button type="button" data-corner="0,1" aria-label="Bottom left"></button>
+                <button type="button" data-corner="1,1" aria-label="Bottom right"></button>
+              </div>
+              <p class="hint">Or drag the bubble in the preview.</p>
+            </div>
+          </div>
+        </details>
+
+        <details class="setting-group" id="prompterSettings">
+          <summary><svg class="icon" aria-hidden="true"><use href="#i-scroll"></use></svg> Teleprompter</summary>
+          <div class="setting-body">
+            <label class="check"><input type="checkbox" id="prompterVisible"> Show teleprompter</label>
+            <div class="field">
+              <label for="prompterScript">Script</label>
+              <textarea id="prompterScript" rows="6" placeholder="Paste your script here. It scrolls on screen while you record and is never part of the video."></textarea>
+            </div>
+            <div class="field">
+              <label for="prompterSpeed">Scroll speed <output id="prompterSpeedValue" for="prompterSpeed">3</output></label>
+              <input type="range" id="prompterSpeed" min="1" max="10" step="1">
+            </div>
+            <div class="field">
+              <label for="prompterSize">Text size <output id="prompterSizeValue" for="prompterSize">32px</output></label>
+              <input type="range" id="prompterSize" min="16" max="72" step="2">
+            </div>
+            <label class="check"><input type="checkbox" id="prompterAutoStart"> Start scrolling when recording starts</label>
+            <label class="check"><input type="checkbox" id="prompterMirror"> Mirror text (for prompter glass)</label>
+          </div>
+        </details>
+
+        <details class="setting-group">
+          <summary><svg class="icon" aria-hidden="true"><use href="#i-timer"></use></svg> Recording</summary>
+          <div class="setting-body">
+            <div class="field">
+              <label for="countdown">Countdown before recording</label>
+              <select id="countdown">
+                <option value="0">None</option>
+                <option value="3">3 seconds</option>
+                <option value="5">5 seconds</option>
+                <option value="10">10 seconds</option>
+              </select>
+            </div>
+            <label class="check"><input type="checkbox" id="countdownBeep"> Beep during the countdown</label>
+            <label class="check" id="floatingControlsField" hidden>
+              <input type="checkbox" id="floatingControls"> Floating controls when recording the screen
+            </label>
+          </div>
+        </details>
+
+        <p class="privacy-note">
+          <svg class="icon" aria-hidden="true"><use href="#i-shield-check"></use></svg>
+          Everything stays on this device. Nothing is uploaded.
+        </p>
+      </aside>
+    </main>
+
+    <section class="panel library" id="library" aria-labelledby="libraryTitle">
+      <div class="library-head">
+        <h2 id="libraryTitle"><svg class="icon" aria-hidden="true"><use href="#i-folder-simple"></use></svg> Your recordings</h2>
+        <div class="library-tools">
+          <div class="library-storage" id="libraryStorage" hidden></div>
+          <button type="button" class="btn btn-sm btn-ghost btn-danger-ghost" id="clearLibraryBtn" hidden>Delete all</button>
+        </div>
+      </div>
+      <p class="library-note">Saved in this browser as you record, so a crash or closed tab won't lose your work. Download the ones you want to keep for good.</p>
+      <ul class="library-list" id="libraryList"></ul>
+      <p class="library-empty" id="libraryEmpty">Nothing here yet. Your recordings are saved here automatically as you record.</p>
+    </section>
+  </div>
+
+  <div class="float-panel" id="floatPanel" hidden>
+    <div class="float-row">
+      <span class="float-status" id="floatStatus"><span class="rec-dot" aria-hidden="true"></span><span id="floatTime">00:00</span></span>
+      <div class="meter meter-mini" aria-hidden="true"><div class="meter-fill" id="floatMeterFill"></div></div>
+      <button type="button" class="ctl ctl-sm" data-float="mute" title="Mute microphone (M)">
+        <svg class="icon" aria-hidden="true"><use href="#i-microphone"></use></svg><span class="ctl-label">Mute</span>
+      </button>
+      <button type="button" class="ctl ctl-sm" data-float="camera" title="Hide the camera bubble (C)" hidden>
+        <svg class="icon" aria-hidden="true"><use href="#i-camera-slash"></use></svg><span class="ctl-label">Cam</span>
+      </button>
+      <button type="button" class="ctl ctl-sm" data-float="pause" title="Pause (P)">
+        <svg class="icon" aria-hidden="true"><use href="#i-pause-fill"></use></svg><span class="ctl-label">Pause</span>
+      </button>
+      <button type="button" class="ctl ctl-sm ctl-stop" data-float="record" title="Start or stop recording (R)">
+        <svg class="icon" aria-hidden="true"><use href="#i-record-fill"></use></svg><span class="ctl-label">Record</span>
+      </button>
     </div>
+    <div class="float-prompter-slot" id="floatPrompterSlot"></div>
+  </div>
 
-    <!-- Standardized Footer -->
-    <footer role="contentinfo" class="wcua-footer">
-      <p>&copy; <span class="copyright-year"></span> WeCanUseAI. Empowering creativity with AI.</p>
-      <nav class="wcua-footer-links" aria-label="Footer navigation">
-        <a href="https://wecanuseai.com/">Home</a>
-        <a href="https://wecanuseai.com/privacy.html">Privacy</a>
-        <a href="https://wecanuseai.com/terms.html">Terms</a>
-        <a href="https://wecanuseai.com/contact.html">Contact</a>
-      </nav>
-    </footer>
+  <dialog class="dialog" id="helpDialog" aria-labelledby="helpTitle">
+    <div class="dialog-head">
+      <h2 id="helpTitle">How to use AV Recorder</h2>
+      <button type="button" class="btn btn-ghost btn-icon-only" data-close aria-label="Close">
+        <svg class="icon" aria-hidden="true"><use href="#i-x"></use></svg>
+      </button>
+    </div>
+    <div class="dialog-body">
+      <ol class="steps">
+        <li>Pick what to record: <strong>Camera</strong>, <strong>Screen</strong>, <strong>Screen + Cam</strong> or <strong>Audio</strong>.</li>
+        <li>Start the preview and check your framing and the microphone level.</li>
+        <li>Press the red button. A countdown gives you time to get ready.</li>
+        <li>Press it again to stop. Download it, share it, or find it later under <strong>Your recordings</strong>.</li>
+      </ol>
 
-    <script src="script.js"></script>
-    <script>
-        document.querySelector('.copyright-year').textContent = new Date().getFullYear();
-    </script>
+      <h3><svg class="icon" aria-hidden="true"><use href="#i-keyboard"></use></svg> Keyboard shortcuts</h3>
+      <dl class="shortcuts">
+        <div><dt><kbd>R</kbd></dt><dd>Start or stop recording</dd></div>
+        <div><dt><kbd>P</kbd> or <kbd>Space</kbd></dt><dd>Pause or resume</dd></div>
+        <div><dt><kbd>M</kbd></dt><dd>Mute or unmute the microphone</dd></div>
+        <div><dt><kbd>C</kbd></dt><dd>Hide or show the camera bubble</dd></div>
+        <div><dt><kbd>S</kbd></dt><dd>Save a still image</dd></div>
+        <div><dt><kbd>T</kbd></dt><dd>Start or stop the teleprompter</dd></div>
+        <div><dt><kbd>Esc</kbd></dt><dd>Cancel the countdown</dd></div>
+        <div><dt><kbd>?</kbd></dt><dd>Show this help</dd></div>
+      </dl>
+
+      <h3><svg class="icon" aria-hidden="true"><use href="#i-info"></use></svg> Good to know</h3>
+      <ul class="tips">
+        <li><strong>Your work is safe.</strong> Recordings are written to this device every second. If the browser crashes or the tab closes, reopen this page and the recording will be in <em>Your recordings</em>.</li>
+        <li><strong>Recording the screen</strong> works in Chrome, Edge, Firefox and Safari on computers. Phones and tablets don't allow it in a browser, so use your phone's built-in screen recorder instead.</li>
+        <li><strong>Sound from your computer:</strong> Chrome and Edge can record a tab's sound (and the whole system's on Windows and ChromeOS). Tick <em>Share audio</em> in the sharing dialog. Firefox and Safari record only your microphone.</li>
+        <li><strong>While recording another window,</strong> use <em>Pop out</em> (Chrome and Edge) to keep the timer, pause and stop buttons, and your teleprompter, floating on top.</li>
+        <li><strong>File formats:</strong> MP4 opens in every editor and phone. When your browser can only make WebM, YouTube still accepts it directly.</li>
+        <li><strong>On iPhone and iPad,</strong> keep the app open while recording. iOS pauses the camera when you switch apps, so the recording pauses too and resumes when you come back. Use <em>Share</em> → <em>Save Video</em> to put it in Photos.</li>
+        <li><strong>Install it</strong> for one-tap access that also works offline: use <em>Install app</em>, or on iPhone <em>Share</em> → <em>Add to Home Screen</em>.</li>
+      </ul>
+      <p class="privacy-note">
+        <svg class="icon" aria-hidden="true"><use href="#i-shield-check"></use></svg>
+        Private by design: there are no accounts, uploads or trackers. Your recordings never leave this device unless you download or share them.
+      </p>
+    </div>
+  </dialog>
+
+  <div id="toastContainer" class="toast-container" aria-live="polite"></div>
+  <div id="sourceHost" class="source-host" aria-hidden="true"></div>
+
+  <!-- Standardized Footer -->
+  <footer role="contentinfo" class="wcua-footer">
+    <p>&copy; <span class="copyright-year"></span> WeCanUseAI. Empowering creativity with AI.</p>
+    <nav class="wcua-footer-links" aria-label="Footer navigation">
+      <a href="https://wecanuseai.com/">Home</a>
+      <a href="https://wecanuseai.com/privacy.html">Privacy</a>
+      <a href="https://wecanuseai.com/terms.html">Terms</a>
+      <a href="https://wecanuseai.com/contact.html">Contact</a>
+    </nav>
+  </footer>
+
+  <script src="js/util.js"></script>
+  <script src="js/settings.js"></script>
+  <script src="js/store.js"></script>
+  <script src="js/formats.js"></script>
+  <script src="js/webm-duration.js"></script>
+  <script src="js/wav.js"></script>
+  <script src="js/audio-engine.js"></script>
+  <script src="js/compositor.js"></script>
+  <script src="js/session.js"></script>
+  <script src="js/teleprompter.js"></script>
+  <script src="js/pip.js"></script>
+  <script src="js/library.js"></script>
+  <script src="js/app.js"></script>
+  <script>
+    document.querySelector('.copyright-year').textContent = new Date().getFullYear();
+  </script>
 </body>
 </html>
