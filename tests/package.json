@@ -1,12 +1,15 @@
 {
   "name": "av-recorder-tests",
   "private": true,
-  "description": "Browser tests for AV Recorder. The app itself needs no install; this is only for developers and CI.",
+  "description": "Checks for AV Recorder. The app itself needs no install; this is only for developers and CI.",
   "type": "module",
   "scripts": {
-    "test": "node --test --test-concurrency=1 --test-timeout=900000 *.test.mjs"
+    "lint": "cd .. && eslint .",
+    "test": "node --test --test-concurrency=1 --test-timeout=900000 *.test.mjs",
+    "check": "npm run lint && npm test"
   },
   "devDependencies": {
+    "eslint": "10.1.0",
     "playwright": "1.56.1"
   }
 }
