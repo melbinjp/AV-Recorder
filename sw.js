@@ -26,8 +26,12 @@ var SHELL = [
   'js/audio-engine.js',
   'js/compositor.js',
   'js/session.js',
+  'js/sources.js',
   'js/teleprompter.js',
   'js/pip.js',
+  'js/meter-view.js',
+  'js/settings-panel.js',
+  'js/review.js',
   'js/library.js',
   'js/app.js',
 ];

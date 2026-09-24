@@ -21,6 +21,7 @@
     this.rafWin = null;
     this.onEdit = null;
     this.onClose = null;
+    this.onStyleChange = null;
     this._bind();
     this.setText(this.s.text);
     this.applyStyle();
@@ -76,6 +77,7 @@
     this.root.classList.toggle('mirrored', !!this.s.mirror);
     if (this.speedEl) this.speedEl.textContent = String(this.s.speed);
     this.render();
+    if (this.onStyleChange) this.onStyleChange();
   };
 
   Teleprompter.prototype.setSpeed = function (v) {

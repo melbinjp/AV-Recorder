@@ -114,6 +114,23 @@
     } catch (e) { /* autoplay refusals are harmless for muted previews */ }
   };
 
+  // The current frame of a <video> as a full-size PNG.
+  AVR.frameToPng = function (video) {
+    return new Promise(function (resolve, reject) {
+      var w = video.videoWidth;
+      var h = video.videoHeight;
+      if (!w || !h) return reject(new Error('No picture'));
+      var c = document.createElement('canvas');
+      c.width = w;
+      c.height = h;
+      c.getContext('2d').drawImage(video, 0, 0, w, h);
+      c.toBlob(function (blob) {
+        if (blob) resolve(blob);
+        else reject(new Error('Could not encode the image'));
+      }, 'image/png');
+    });
+  };
+
   AVR.downloadBlob = function (blob, filename) {
     var url = URL.createObjectURL(blob);
     var a = document.createElement('a');
