@@ -27,6 +27,8 @@
     hasDocumentPip: 'documentPictureInPicture' in window,
   };
 
+  AVR.VERSION = self.AVR_VERSION || 'dev';
+
   AVR.$ = function (sel, root) { return (root || document).querySelector(sel); };
   AVR.$$ = function (sel, root) { return Array.prototype.slice.call((root || document).querySelectorAll(sel)); };
 
@@ -190,6 +192,15 @@
       default:
         return 'Could not start your ' + thing + (err && err.message ? ': ' + err.message : '.');
     }
+  };
+
+  // Tells screen-reader users about a change they can't see (recording
+  // started, paused, saved). Toasts are polite; this one is assertive.
+  AVR.announce = function (text) {
+    var el = document.getElementById('srStatus');
+    if (!el) return;
+    el.textContent = '';
+    setTimeout(function () { el.textContent = text; }, 50);
   };
 
   // ---- Toasts -------------------------------------------------------------

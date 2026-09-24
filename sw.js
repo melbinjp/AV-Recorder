@@ -4,8 +4,13 @@
 // Strategy: network first, cache as fallback. Online you always get the latest
 // version (no stale page mixed with newer scripts); offline, the last good copy
 // is served. The app shell is pre-cached on install so the very first offline
-// visit works too. Bump VERSION when the list of files changes.
-var VERSION = 'avr-v2';
+// visit works too.
+//
+// The cache is named after the app version (js/version.js), so a release
+// replaces it cleanly. Every file the page loads must be listed in SHELL; a
+// test checks this.
+importScripts('js/version.js');
+var VERSION = 'avr-' + (self.AVR_VERSION || 'dev');
 var SHELL = [
   './',
   'index.html',
@@ -17,6 +22,8 @@ var SHELL = [
   'icons/icon-maskable-512.png',
   'icons/apple-touch-icon.png',
   'js/icons.js',
+  'js/version.js',
+  'js/diagnostics.js',
   'js/util.js',
   'js/settings.js',
   'js/store.js',

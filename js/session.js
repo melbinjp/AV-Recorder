@@ -5,6 +5,14 @@
 
   var TIMESLICE = 1000; // ms of media per chunk, and so the most a crash can lose
   var LOCK_PREFIX = 'avr-rec-';
+  var MB = 1024 * 1024;
+  // If device storage fails mid-recording, chunks are kept in memory instead.
+  // Past this much the tab risks being killed for memory, taking the recording
+  // with it, so the app stops and saves first. Phones get far less headroom.
+
+  function log(level, event, detail) {
+    if (AVR.log) AVR.log(level, event, detail);
+  }
 
   function uid() {
     return Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
@@ -20,7 +28,12 @@
     var attempts = [];
     var mime = opts.format && opts.format.mime;
     var bitrates = {};
-    if (opts.videoBitsPerSecond) bitrates.videoBitsPerSecond = opts.videoBitsPerSecond;
+    if (opts.videoBitsPerSecond) {
+      bitrates.videoBitsPerSecond = opts.videoBitsPerSecond;
+      // A keyframe every 2 s (Chrome 126+; ignored elsewhere): quick seeking in
+      // players and editors for a small size cost. YouTube recommends 2 s.
+      bitrates.videoKeyFrameIntervalDuration = 2000;
+    }
     if (opts.audioBitsPerSecond) bitrates.audioBitsPerSecond = opts.audioBitsPerSecond;
     if (mime) {
       attempts.push(Object.assign({ mimeType: mime }, bitrates));
@@ -49,6 +62,9 @@
     this.seq = 0;
     this.bytes = 0;
     this.memChunks = [];
+    this.memBytes = 0;
+    this.headBlob = null;
+    this.limitHit = false;
     this.persist = false;
     this.storageFailed = false;
     this.writeChain = Promise.resolve();
@@ -59,12 +75,20 @@
     this.releaseLock = null;
     this.onerror = null;
     this.onwarning = null;
+    this.onlimit = null;
   }
 
   RecordingSession.TIMESLICE = TIMESLICE;
+  RecordingSession.memoryBudget = AVR.platform && AVR.platform.isMobile ? 300 * MB : 2048 * MB;
 
   RecordingSession.prototype.elapsed = function () {
     return this.activeMs + (this.state === 'recording' ? now() - this.resumedAt : 0);
+  };
+
+  // Measured bytes per second of recording, once there is enough to measure.
+  RecordingSession.prototype.byteRate = function () {
+    var ms = this.elapsed();
+    return ms > 5000 && this.bytes > 0 ? this.bytes / (ms / 1000) : 0;
   };
 
   RecordingSession.prototype.start = function () {
@@ -115,6 +139,14 @@
       self.state = 'recording';
       self.resumedAt = now();
       self._lock();
+      log('info', 'record-start', {
+        mode: o.mode,
+        mime: rec.mimeType || self.mimeType || 'default',
+        video: o.videoBitsPerSecond || 0,
+        audio: o.audioBitsPerSecond || 0,
+        size: (o.width || 0) + 'x' + (o.height || 0),
+        stored: self.persist,
+      });
     });
   };
 
@@ -124,9 +156,12 @@
     var seq = this.seq++;
     this.bytes += blob.size;
     if (blob.type && (!this.mimeType || this.mimeType.indexOf('/') === -1)) this.mimeType = blob.type;
+    // Keep the original first chunk: the file header lives in it, and it is
+    // patched from memory at the end rather than read back from storage.
+    if (seq === 0) this.headBlob = blob;
 
     if (!this.persist || this.storageFailed) {
-      this.memChunks.push({ seq: seq, blob: blob });
+      this._keepInMemory(seq, blob);
       return;
     }
     var patch = {
@@ -139,16 +174,27 @@
     };
     this.writeChain = this.writeChain.then(function () {
       return AVR.store.appendChunk(self.id, seq, blob, patch);
-    }).catch(function () {
+    }).catch(function (err) {
       // Usually a full disk. Keep recording into memory rather than stop.
-      self.memChunks.push({ seq: seq, blob: blob });
       if (!self.storageFailed) {
         self.storageFailed = true;
+        log('error', 'storage-write-failed', err);
         if (self.onwarning) {
           self.onwarning('Device storage is full. Recording continues in memory. Download it as soon as you stop.');
         }
       }
+      self._keepInMemory(seq, blob);
     });
+  };
+
+  RecordingSession.prototype._keepInMemory = function (seq, blob) {
+    this.memChunks.push({ seq: seq, blob: blob });
+    this.memBytes += blob.size;
+    if (!this.limitHit && this.memBytes > RecordingSession.memoryBudget) {
+      this.limitHit = true;
+      log('error', 'memory-limit', AVR.formatBytes(this.memBytes));
+      if (this.onlimit) this.onlimit();
+    }
   };
 
   RecordingSession.prototype.pause = function () {
@@ -240,10 +286,17 @@
     var ext = AVR.formats.extFor(this.mimeType, this.kind);
 
     return this._collect().then(function (chunks) {
-      if (!chunks.length) throw new Error('Nothing was recorded. The source may have stopped before recording began.');
+      if (!chunks.length) {
+        log('error', 'record-empty', { seq: self.seq, bytes: self.bytes });
+        throw new Error('Nothing was recorded. The source may have stopped before recording began.');
+      }
       var first = chunks[0];
-      var fixing = /webm/i.test(type) ? AVR.webm.fixDuration(first.blob, durationMs) : Promise.resolve(first.blob);
+      var isWebm = /webm/i.test(type);
+      var source = first.seq === 0 && self.headBlob ? self.headBlob : first.blob;
+      var fixing = isWebm ? AVR.webm.fixDuration(source, durationMs) : Promise.resolve(source);
       return fixing.then(function (fixedFirst) {
+        var patched = fixedFirst !== source;
+        if (isWebm && !patched) log('warn', 'webm-duration-not-set', AVR.formatBytes(source.size));
         var blobs = chunks.map(function (c) { return c.blob; });
         blobs[0] = fixedFirst;
         var blob = new Blob(blobs, { type: type });
@@ -261,7 +314,7 @@
         if (!self.persist) return result;
 
         var writes = [];
-        if (fixedFirst !== first.blob) writes.push(AVR.store.putChunk(self.id, first.seq, fixedFirst));
+        if (patched) writes.push(AVR.store.putChunk(self.id, first.seq, fixedFirst));
         self.memChunks.forEach(function (c) { writes.push(AVR.store.putChunk(self.id, c.seq, c.blob)); });
         return Promise.all(writes).then(function () {
           return true;
@@ -279,8 +332,11 @@
             updatedAt: Date.now(),
           }).then(function () {
             result.saved = complete;
+            log(complete ? 'info' : 'error', complete ? 'record-saved' : 'record-partly-saved',
+              { ms: durationMs, bytes: blob.size, chunks: chunks.length, type: type });
             return result;
-          }, function () {
+          }, function (err) {
+            log('error', 'record-save-failed', err);
             return result;
           });
         });
@@ -315,6 +371,7 @@
   }
 
   function recoverOne(rec) {
+    log('warn', 'recovering', { id: rec.id, ms: rec.durationMs, bytes: rec.size });
     return AVR.store.getChunks(rec.id).then(function (chunks) {
       if (!chunks.length) return AVR.store.deleteRecording(rec.id).then(function () { return null; });
       var size = 0;
@@ -333,7 +390,10 @@
           chunkCount: chunks.length,
         });
       });
-    }).catch(function () { return null; });
+    }).catch(function (err) {
+      log('error', 'recover-failed', err);
+      return null;
+    });
   }
 
   // Finalizes recordings left unfinished by a crash, closed tab or dead battery.

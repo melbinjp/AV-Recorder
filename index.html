@@ -377,6 +377,7 @@
         </div>
       </div>
       <p class="library-note">Saved in this browser as you record, so a crash or closed tab won't lose your work. Download the ones you want to keep for good.</p>
+      <p class="library-note library-persist" id="libraryPersist" hidden>This browser hasn't promised to keep them if the device runs very low on space, so download anything important.</p>
       <ul class="library-list" id="libraryList"></ul>
       <p class="library-empty" id="libraryEmpty">Nothing here yet. Your recordings are saved here automatically as you record.</p>
     </section>
@@ -443,10 +444,21 @@
         <svg class="icon" aria-hidden="true"><use href="#i-shield-check"></use></svg>
         Private by design: there are no accounts, uploads or trackers. Your recordings never leave this device unless you download or share them.
       </p>
+
+      <details class="diagnostics" id="diagnostics">
+        <summary>Diagnostics for bug reports</summary>
+        <p class="hint">Technical details about this browser and recent recorder events. Nothing is sent anywhere. If something went wrong, copy this into your report.</p>
+        <pre class="diag-text" id="diagText">Loading…</pre>
+        <button type="button" class="btn btn-sm btn-secondary" id="copyDiagBtn">
+          <svg class="icon" aria-hidden="true"><use href="#i-copy"></use></svg> Copy
+        </button>
+      </details>
+      <p class="app-version">AV Recorder <span id="appVersion"></span></p>
     </div>
   </dialog>
 
   <div id="toastContainer" class="toast-container" aria-live="polite"></div>
+  <div id="srStatus" class="sr-only" role="status" aria-live="assertive"></div>
   <div id="sourceHost" class="source-host" aria-hidden="true"></div>
 
   <!-- Standardized Footer -->
@@ -460,6 +472,8 @@
     </nav>
   </footer>
 
+  <script src="js/version.js"></script>
+  <script src="js/diagnostics.js"></script>
   <script src="js/util.js"></script>
   <script src="js/settings.js"></script>
   <script src="js/store.js"></script>

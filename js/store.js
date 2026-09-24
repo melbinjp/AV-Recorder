@@ -204,9 +204,25 @@
       return navigator.storage.estimate().catch(function () { return null; });
     },
 
+    // {available, usage, quota, persisted}: one call for everything the UI
+    // and the diagnostics report need to know about storage.
+    status: function () {
+      var persisted = navigator.storage && navigator.storage.persisted
+        ? navigator.storage.persisted().catch(function () { return false; })
+        : Promise.resolve(false);
+      return Promise.all([Store.available(), Store.estimate(), persisted]).then(function (r) {
+        return {
+          available: r[0],
+          usage: (r[1] && r[1].usage) || 0,
+          quota: (r[1] && r[1].quota) || 0,
+          persisted: !!r[2],
+        };
+      });
+    },
+
     // Asks the browser not to evict recordings under storage pressure. Chrome
-    // decides silently; Firefox may show a prompt, so only call it on a
-    // user action (starting a recording).
+    // decides silently; Firefox may show a prompt, so it is asked once a
+    // recording has been saved, not while one is starting.
     persist: function () {
       if (!navigator.storage || !navigator.storage.persist) return Promise.resolve(false);
       return navigator.storage.persisted()
